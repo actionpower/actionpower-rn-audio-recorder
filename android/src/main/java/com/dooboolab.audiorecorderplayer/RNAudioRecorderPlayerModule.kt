@@ -1,6 +1,7 @@
 package com.dooboolab.audiorecorderplayer
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.MediaPlayer
 import android.media.MediaRecorder
@@ -16,6 +17,7 @@ import com.facebook.react.modules.core.DeviceEventManagerModule.RCTDeviceEventEm
 import com.facebook.react.modules.core.PermissionListener
 import java.io.IOException
 import java.util.*
+import kotlin.math.log
 import kotlin.math.log10
 
 class RNAudioRecorderPlayerModule(private val reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext), PermissionListener {
@@ -85,6 +87,15 @@ class RNAudioRecorderPlayerModule(private val reactContext: ReactApplicationCont
             mediaRecorder!!.prepare()
             totalPausedRecordTime = 0L
             mediaRecorder!!.start()
+
+            val serviceIntent = Intent(reactContext, ForegroundService::class.java)
+            serviceIntent.putExtra(ForegroundService.STOPWATCH_ACTION, ForegroundService.START)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O){
+                reactContext.startForegroundService(serviceIntent)
+            }else{
+                reactContext.startService(serviceIntent)
+            }
+
             val systemTime = SystemClock.elapsedRealtime()
             recorderRunnable = object : Runnable {
                 override fun run() {
@@ -108,6 +119,7 @@ class RNAudioRecorderPlayerModule(private val reactContext: ReactApplicationCont
                 }
             }
             (recorderRunnable as Runnable).run()
+
             promise.resolve("file:///$audioFileURL")
         } catch (e: Exception) {
             Log.e(tag, "Exception: ", e)
@@ -171,6 +183,8 @@ class RNAudioRecorderPlayerModule(private val reactContext: ReactApplicationCont
 
         mediaRecorder!!.release()
         mediaRecorder = null
+        val serviceIntent = Intent(reactContext, ForegroundService::class.java)
+        reactContext.stopService(serviceIntent)
         promise.resolve("file:///$audioFileURL")
     }
 

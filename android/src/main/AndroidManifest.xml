@@ -1,8 +1,12 @@
 
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-          package="com.dooboolab.audiorecorderplayer">
+    package="com.dooboolab.audiorecorderplayer">
     <!-- dooboolab -->
-    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <application>
+        <service android:name=".ForegroundService" android:stopWithTask="false"/>
+    </application>
 </manifest>
-  
