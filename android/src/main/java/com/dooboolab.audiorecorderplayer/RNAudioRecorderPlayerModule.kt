@@ -2,6 +2,7 @@ package com.dooboolab.audiorecorderplayer
 
 import android.Manifest
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.media.MediaPlayer
 import android.media.MediaRecorder
@@ -10,6 +11,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.telephony.TelephonyManager
 import android.util.Log
 import androidx.core.app.ActivityCompat
 import com.facebook.react.bridge.*
@@ -17,7 +19,6 @@ import com.facebook.react.modules.core.DeviceEventManagerModule.RCTDeviceEventEm
 import com.facebook.react.modules.core.PermissionListener
 import java.io.IOException
 import java.util.*
-import kotlin.math.log
 import kotlin.math.log10
 
 class RNAudioRecorderPlayerModule(private val reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext), PermissionListener {
@@ -32,6 +33,9 @@ class RNAudioRecorderPlayerModule(private val reactContext: ReactApplicationCont
     private var pausedRecordTime = 0L
     private var totalPausedRecordTime = 0L
     var recordHandler: Handler? = Handler(Looper.getMainLooper())
+
+    private val callReceiver: CallReceiver = CallReceiver(this)
+
     override fun getName(): String {
         return tag
     }
@@ -44,7 +48,7 @@ class RNAudioRecorderPlayerModule(private val reactContext: ReactApplicationCont
                 // https://github.com/hyochan/react-native-audio-recorder-player/issues/503
                 if (Build.VERSION.SDK_INT < 33 &&
                         (ActivityCompat.checkSelfPermission(reactContext, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED ||
-                        ActivityCompat.checkSelfPermission(reactContext, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED))  {
+                                ActivityCompat.checkSelfPermission(reactContext, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED))  {
                     ActivityCompat.requestPermissions((currentActivity)!!, arrayOf(
                             Manifest.permission.RECORD_AUDIO,
                             Manifest.permission.WRITE_EXTERNAL_STORAGE), 0)
@@ -55,6 +59,8 @@ class RNAudioRecorderPlayerModule(private val reactContext: ReactApplicationCont
                     promise.reject("No permission granted.", "Try again after adding permission.")
                     return
                 }
+                val intentFilter = IntentFilter(TelephonyManager.ACTION_PHONE_STATE_CHANGED)
+                reactContext.registerReceiver(callReceiver, intentFilter)
             }
         } catch (ne: NullPointerException) {
             Log.w(tag, ne.toString())
@@ -128,9 +134,9 @@ class RNAudioRecorderPlayerModule(private val reactContext: ReactApplicationCont
     }
 
     @ReactMethod
-    fun resumeRecorder(promise: Promise) {
+    fun resumeRecorder(promise: Promise?) {
         if (mediaRecorder == null) {
-            promise.reject("resumeReocrder", "Recorder is null.")
+            promise?.reject("resumeReocrder", "Recorder is null.")
             return
         }
 
@@ -138,17 +144,24 @@ class RNAudioRecorderPlayerModule(private val reactContext: ReactApplicationCont
             mediaRecorder!!.resume()
             totalPausedRecordTime += SystemClock.elapsedRealtime() - pausedRecordTime;
             recorderRunnable?.let { recordHandler!!.postDelayed(it, subsDurationMillis.toLong()) }
-            promise.resolve("Recorder resumed.")
+            if (promise != null) {
+                promise.resolve("Recorder resumed.")
+            } else {
+                val obj = Arguments.createMap()
+                obj.putString("status", "resume")
+                sendEvent(reactContext, "rn-recordback", obj)
+            }
+
         } catch (e: Exception) {
             Log.e(tag, "Recorder resume: " + e.message)
-            promise.reject("resumeRecorder", e.message)
+            promise?.reject("resumeRecorder", e.message)
         }
     }
 
     @ReactMethod
-    fun pauseRecorder(promise: Promise) {
+    fun pauseRecorder(promise: Promise?) {
         if (mediaRecorder == null) {
-            promise.reject("pauseRecorder", "Recorder is null.")
+            promise?.reject("pauseRecorder", "Recorder is null.")
             return
         }
 
@@ -156,10 +169,16 @@ class RNAudioRecorderPlayerModule(private val reactContext: ReactApplicationCont
             mediaRecorder!!.pause()
             pausedRecordTime = SystemClock.elapsedRealtime();
             recorderRunnable?.let { recordHandler!!.removeCallbacks(it) };
-            promise.resolve("Recorder paused.")
+            if (promise != null) {
+                promise.resolve("Recorder paused.")
+            } else {
+                val obj = Arguments.createMap()
+                obj.putString("status", "paused")
+                sendEvent(reactContext, "rn-recordback", obj)
+            }
         } catch (e: Exception) {
             Log.e(tag, "pauseRecorder exception: " + e.message)
-            promise.reject("pauseRecorder", e.message)
+            promise?.reject("pauseRecorder", e.message)
         }
     }
 
@@ -176,6 +195,7 @@ class RNAudioRecorderPlayerModule(private val reactContext: ReactApplicationCont
 
         try {
             mediaRecorder!!.stop()
+            reactContext.unregisterReceiver(callReceiver)
         } catch (stopException: RuntimeException) {
             stopException.message?.let { Log.d(tag,"" + it) }
             promise.reject("stopRecord", stopException.message)
