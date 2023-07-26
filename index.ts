@@ -272,11 +272,9 @@ class AudioRecorderPlayer {
   resumeRecorder = async (): Promise<string> => {
     if (this._hasPausedRecord) {
       this._hasPausedRecord = false;
-
-      return RNAudioRecorderPlayer.resumeRecorder();
     }
 
-    return 'Currently recording.';
+    return RNAudioRecorderPlayer.resumeRecorder();
   };
 
   /**

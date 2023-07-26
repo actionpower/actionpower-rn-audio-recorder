@@ -18,6 +18,8 @@ class RNAudioRecorderPlayer: RCTEventEmitter, AVAudioRecorderDelegate {
     var audioSession: AVAudioSession!
     var recordTimer: Timer?
     var _meteringEnabled: Bool = false
+    var _isPausedByUser: Bool = false
+    var _isPausedByInterrupt: Bool = false
 
     // Player
     var pausedPlayTime: CMTime?
@@ -46,6 +48,46 @@ class RNAudioRecorderPlayer: RCTEventEmitter, AVAudioRecorderDelegate {
             audioFileURL = cachesDirectory.appendingPathComponent(path)
         }
     }
+    
+    
+    @objc func handleAudioSessionInterruption(notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let interruptionTypeRawValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let interruptionType = AVAudioSession.InterruptionType(rawValue: interruptionTypeRawValue) else {
+            return
+        }
+
+        switch interruptionType {
+        case .began:
+            // 간섭이 시작될 때 호출됩니다.
+            if (!_isPausedByUser) {
+                recordTimer?.invalidate()
+                recordTimer = nil;
+                _isPausedByInterrupt = true
+                
+                audioRecorder.pause()
+                sendEvent(withName: "rn-recordback", body: ["status": "paused"])
+            }
+        case .ended:
+            // 간섭이 끝날 때 호출됩니다.
+            if (_isPausedByInterrupt) {
+                do {
+//                    try AVAudioSession.sharedInstance().setActive(true)
+                    audioRecorder.record()
+                    if (recordTimer == nil) {
+                        startRecorderTimer()
+                    }
+                    _isPausedByInterrupt = false
+                    sendEvent(withName: "rn-recordback", body: ["status": "resume"])
+                } catch {
+                    print("Failed to activate audio session or resume recording.")
+                }
+            }
+        @unknown default:
+            break
+        }
+    }
+    
 
     /**********               Recorder               **********/
 
@@ -93,6 +135,8 @@ class RNAudioRecorderPlayer: RCTEventEmitter, AVAudioRecorderDelegate {
 
         recordTimer?.invalidate()
         recordTimer = nil;
+        
+        _isPausedByUser = true
 
         audioRecorder.pause()
         resolve("Recorder paused!")
@@ -106,12 +150,19 @@ class RNAudioRecorderPlayer: RCTEventEmitter, AVAudioRecorderDelegate {
         if (audioRecorder == nil) {
             return reject("RNAudioPlayerRecorder", "Recorder is nil", nil)
         }
+        
+        if (_isPausedByInterrupt) {
+            return reject("RNAudioPlayerRecorder", "녹음을 재개 할 수 없습니다.", nil)
+        }
+        
 
         audioRecorder.record()
 
         if (recordTimer == nil) {
             startRecorderTimer()
         }
+        
+        _isPausedByUser = false
 
         resolve("Recorder paused!")
     }
@@ -269,11 +320,13 @@ class RNAudioRecorderPlayer: RCTEventEmitter, AVAudioRecorderDelegate {
                 reject("RNAudioPlayerRecorder", "Error occured during recording", nil)
             }
         }
+        
 
+        NotificationCenter.default.addObserver(self, selector: #selector(handleAudioSessionInterruption(notification:)), name: AVAudioSession.interruptionNotification, object: nil)
         audioSession = AVAudioSession.sharedInstance()
 
         do {
-            try audioSession.setCategory(.playAndRecord, mode: avMode, options: [AVAudioSession.CategoryOptions.defaultToSpeaker, AVAudioSession.CategoryOptions.allowBluetooth])
+            try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP, .interruptSpokenAudioAndMixWithOthers])
             try audioSession.setActive(true)
 
             audioSession.requestRecordPermission { granted in
@@ -306,6 +359,9 @@ class RNAudioRecorderPlayer: RCTEventEmitter, AVAudioRecorderDelegate {
             recordTimer!.invalidate()
             recordTimer = nil
         }
+        
+        NotificationCenter.default.removeObserver(self, name: AVAudioSession.interruptionNotification, object: nil)
+
 
         resolve(audioFileURL?.absoluteString)
     }
