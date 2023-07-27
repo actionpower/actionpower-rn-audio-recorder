@@ -6,7 +6,7 @@ import {
   Platform,
 } from 'react-native';
 
-const {RNAudioRecorderPlayer} = NativeModules;
+const {RNAudioRecorder} = NativeModules;
 
 export enum AudioSourceAndroidType {
   DEFAULT = 0,
@@ -186,7 +186,7 @@ class AudioRecorder {
         callback,
       );
     } else {
-      const myModuleEvt = new NativeEventEmitter(RNAudioRecorderPlayer);
+      const myModuleEvt = new NativeEventEmitter(RNAudioRecorder);
 
       this._recorderSubscription = myModuleEvt.addListener(
         'rn-recordback',
@@ -219,7 +219,7 @@ class AudioRecorder {
     if (!this._isRecording) {
       this._isRecording = true;
 
-      return RNAudioRecorderPlayer.startRecorder(
+      return RNAudioRecorder.startRecorder(
         uri ?? 'DEFAULT',
         audioSets,
         meteringEnabled ?? false,
@@ -237,7 +237,7 @@ class AudioRecorder {
     if (!this._hasPausedRecord) {
       this._hasPausedRecord = true;
 
-      return RNAudioRecorderPlayer.pauseRecorder();
+      return RNAudioRecorder.pauseRecorder();
     }
 
     return 'Already paused recording.';
@@ -252,7 +252,7 @@ class AudioRecorder {
       this._hasPausedRecord = false;
     }
 
-    return RNAudioRecorderPlayer.resumeRecorder();
+    return RNAudioRecorder.resumeRecorder();
   };
 
   /**
@@ -264,7 +264,7 @@ class AudioRecorder {
       this._isRecording = false;
       this._hasPausedRecord = false;
 
-      return RNAudioRecorderPlayer.stopRecorder();
+      return RNAudioRecorder.stopRecorder();
     }
 
     return 'Already stopped';
