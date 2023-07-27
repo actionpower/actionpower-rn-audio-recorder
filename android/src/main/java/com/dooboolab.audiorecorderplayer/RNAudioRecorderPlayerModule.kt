@@ -1,43 +1,85 @@
 package com.dooboolab.audiorecorderplayer
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.content.pm.PackageManager
-import android.media.MediaPlayer
 import android.media.MediaRecorder
-import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
-import android.telephony.TelephonyManager
 import android.util.Log
+import android.media.AudioManager;
 import androidx.core.app.ActivityCompat
 import com.facebook.react.bridge.*
 import com.facebook.react.modules.core.DeviceEventManagerModule.RCTDeviceEventEmitter
 import com.facebook.react.modules.core.PermissionListener
-import java.io.IOException
-import java.util.*
 import kotlin.math.log10
 
-class RNAudioRecorderPlayerModule(private val reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext), PermissionListener {
+class RNAudioRecorderPlayerModule(private val reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext), PermissionListener, AudioManager.OnAudioFocusChangeListener {
     private var audioFileURL = ""
     private var subsDurationMillis = 500
     private var _meteringEnabled = false
     private var mediaRecorder: MediaRecorder? = null
-    private var mediaPlayer: MediaPlayer? = null
     private var recorderRunnable: Runnable? = null
-    private var mTask: TimerTask? = null
-    private var mTimer: Timer? = null
     private var pausedRecordTime = 0L
     private var totalPausedRecordTime = 0L
+    private var isPausedByUser = false
+    private var isPausedByInterrupt = false
+    private var isInterrupted = false
     var recordHandler: Handler? = Handler(Looper.getMainLooper())
-
-    private val callReceiver: CallReceiver = CallReceiver(this)
 
     override fun getName(): String {
         return tag
+    }
+
+    private fun sendEvent(reactContext: ReactContext,
+                          eventName: String,
+                          params: WritableMap?) {
+        reactContext
+                .getJSModule<RCTDeviceEventEmitter>(RCTDeviceEventEmitter::class.java)
+                .emit(eventName, params)
+    }
+
+    override fun onAudioFocusChange(focusChange: Int) {
+        when (focusChange) {
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT, AudioManager.AUDIOFOCUS_LOSS, AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                isInterrupted = true
+                if (!isPausedByUser) {
+                    isPausedByInterrupt = true
+                    pauseRecorder(null)
+                    val obj = Arguments.createMap()
+                    obj.putString("status", "paused")
+                    sendEvent(reactContext, "rn-recordback", obj)
+                }
+            }
+            AudioManager.AUDIOFOCUS_GAIN -> {
+                isInterrupted = false
+                if (isPausedByInterrupt) {
+                    isPausedByInterrupt = false
+                    resumeRecorder(null);
+                    val obj = Arguments.createMap()
+                    obj.putString("status", "resume")
+                    sendEvent(reactContext, "rn-recordback", obj)
+                }
+            }
+        }
+    }
+
+    private fun requestAudioFocus(): Boolean {
+        val audioManager = reactContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val result = audioManager.requestAudioFocus(
+                this,
+                AudioManager.STREAM_MUSIC,
+                AudioManager.AUDIOFOCUS_GAIN
+        )
+        return result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+    }
+
+    private fun abandonAudioFocus() {
+        val audioManager = reactContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        audioManager.abandonAudioFocus(this)
     }
 
     @ReactMethod
@@ -59,8 +101,6 @@ class RNAudioRecorderPlayerModule(private val reactContext: ReactApplicationCont
                     promise.reject("No permission granted.", "Try again after adding permission.")
                     return
                 }
-                val intentFilter = IntentFilter(TelephonyManager.ACTION_PHONE_STATE_CHANGED)
-                reactContext.registerReceiver(callReceiver, intentFilter)
             }
         } catch (ne: NullPointerException) {
             Log.w(tag, ne.toString())
@@ -93,6 +133,7 @@ class RNAudioRecorderPlayerModule(private val reactContext: ReactApplicationCont
             mediaRecorder!!.prepare()
             totalPausedRecordTime = 0L
             mediaRecorder!!.start()
+            requestAudioFocus()
 
             val serviceIntent = Intent(reactContext, ForegroundService::class.java)
             serviceIntent.putExtra(ForegroundService.STOPWATCH_ACTION, ForegroundService.START)
@@ -134,31 +175,6 @@ class RNAudioRecorderPlayerModule(private val reactContext: ReactApplicationCont
     }
 
     @ReactMethod
-    fun resumeRecorder(promise: Promise?) {
-        if (mediaRecorder == null) {
-            promise?.reject("resumeReocrder", "Recorder is null.")
-            return
-        }
-
-        try {
-            mediaRecorder!!.resume()
-            totalPausedRecordTime += SystemClock.elapsedRealtime() - pausedRecordTime;
-            recorderRunnable?.let { recordHandler!!.postDelayed(it, subsDurationMillis.toLong()) }
-            if (promise != null) {
-                promise.resolve("Recorder resumed.")
-            } else {
-                val obj = Arguments.createMap()
-                obj.putString("status", "resume")
-                sendEvent(reactContext, "rn-recordback", obj)
-            }
-
-        } catch (e: Exception) {
-            Log.e(tag, "Recorder resume: " + e.message)
-            promise?.reject("resumeRecorder", e.message)
-        }
-    }
-
-    @ReactMethod
     fun pauseRecorder(promise: Promise?) {
         if (mediaRecorder == null) {
             promise?.reject("pauseRecorder", "Recorder is null.")
@@ -167,18 +183,38 @@ class RNAudioRecorderPlayerModule(private val reactContext: ReactApplicationCont
 
         try {
             mediaRecorder!!.pause()
+            isPausedByUser = true
             pausedRecordTime = SystemClock.elapsedRealtime();
             recorderRunnable?.let { recordHandler!!.removeCallbacks(it) };
-            if (promise != null) {
-                promise.resolve("Recorder paused.")
-            } else {
-                val obj = Arguments.createMap()
-                obj.putString("status", "paused")
-                sendEvent(reactContext, "rn-recordback", obj)
-            }
+            promise?.resolve("Recorder paused.")
         } catch (e: Exception) {
             Log.e(tag, "pauseRecorder exception: " + e.message)
             promise?.reject("pauseRecorder", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun resumeRecorder(promise: Promise?) {
+        if (mediaRecorder == null) {
+            promise?.reject("resumeReocrder", "Recorder is null.")
+            return
+        }
+
+        if (isInterrupted) {
+            promise?.reject("resumeReocrder", "Recorder is null.")
+            return
+        }
+
+        try {
+            mediaRecorder!!.resume()
+            isPausedByUser = false
+            totalPausedRecordTime += SystemClock.elapsedRealtime() - pausedRecordTime;
+            recorderRunnable?.let { recordHandler!!.postDelayed(it, subsDurationMillis.toLong()) }
+            promise?.resolve("Recorder resumed.")
+
+        } catch (e: Exception) {
+            Log.e(tag, "Recorder resume: " + e.message)
+            promise?.reject("resumeRecorder", e.message)
         }
     }
 
@@ -195,7 +231,7 @@ class RNAudioRecorderPlayerModule(private val reactContext: ReactApplicationCont
 
         try {
             mediaRecorder!!.stop()
-            reactContext.unregisterReceiver(callReceiver)
+            abandonAudioFocus()
         } catch (stopException: RuntimeException) {
             stopException.message?.let { Log.d(tag,"" + it) }
             promise.reject("stopRecord", stopException.message)
@@ -206,182 +242,6 @@ class RNAudioRecorderPlayerModule(private val reactContext: ReactApplicationCont
         val serviceIntent = Intent(reactContext, ForegroundService::class.java)
         reactContext.stopService(serviceIntent)
         promise.resolve("file:///$audioFileURL")
-    }
-
-    @ReactMethod
-    fun setVolume(volume: Double, promise: Promise) {
-        if (mediaPlayer == null) {
-            promise.reject("setVolume", "player is null.")
-            return
-        }
-
-        val mVolume = volume.toFloat()
-        mediaPlayer!!.setVolume(mVolume, mVolume)
-        promise.resolve("set volume")
-    }
-
-    @ReactMethod
-    fun startPlayer(path: String, httpHeaders: ReadableMap?, promise: Promise) {
-        if (mediaPlayer != null) {
-            val isPaused = !mediaPlayer!!.isPlaying && mediaPlayer!!.currentPosition > 1
-
-            if (isPaused) {
-                mediaPlayer!!.start()
-                promise.resolve("player resumed.")
-                return
-            }
-
-            Log.e(tag, "Player is already running. Stop it first.")
-            promise.reject("startPlay", "Player is already running. Stop it first.")
-            return
-        } else {
-            mediaPlayer = MediaPlayer()
-        }
-
-        try {
-            if ((path == "DEFAULT")) {
-                mediaPlayer!!.setDataSource("${reactContext.cacheDir}/$defaultFileName")
-            } else {
-                if (httpHeaders != null) {
-                    val headers: MutableMap<String, String?> = HashMap<String, String?>()
-                    val iterator = httpHeaders.keySetIterator()
-                    while (iterator.hasNextKey()) {
-                        val key = iterator.nextKey()
-                        headers.put(key, httpHeaders.getString(key))
-                    }
-                    mediaPlayer!!.setDataSource(currentActivity!!.applicationContext, Uri.parse(path), headers)
-                } else {
-                    mediaPlayer!!.setDataSource(path)
-                }
-            }
-
-            mediaPlayer!!.setOnPreparedListener { mp ->
-                Log.d(tag, "mediaplayer prepared and start")
-                mp.start()
-                /**
-                 * Set timer task to send event to RN.
-                 */
-                mTask = object : TimerTask() {
-                    override fun run() {
-                        val obj = Arguments.createMap()
-                        obj.putInt("duration", mp.duration)
-                        obj.putInt("currentPosition", mp.currentPosition)
-                        sendEvent(reactContext, "rn-playback", obj)
-                    }
-                }
-
-                mTimer = Timer()
-                mTimer!!.schedule(mTask, 0, subsDurationMillis.toLong())
-                val resolvedPath = if (((path == "DEFAULT"))) "${reactContext.cacheDir}/$defaultFileName" else path
-                promise.resolve(resolvedPath)
-            }
-
-            /**
-             * Detect when finish playing.
-             */
-            mediaPlayer!!.setOnCompletionListener { mp ->
-                /**
-                 * Send last event
-                 */
-                val obj = Arguments.createMap()
-                obj.putInt("duration", mp.duration)
-                obj.putInt("currentPosition", mp.duration)
-                sendEvent(reactContext, "rn-playback", obj)
-                /**
-                 * Reset player.
-                 */
-                Log.d(tag, "Plays completed.")
-                mTimer!!.cancel()
-                mp.stop()
-                mp.release()
-                mediaPlayer = null
-            }
-
-            mediaPlayer!!.prepare()
-        } catch (e: IOException) {
-            Log.e(tag, "startPlay() io exception")
-            promise.reject("startPlay", e.message)
-        } catch (e: NullPointerException) {
-            Log.e(tag, "startPlay() null exception")
-        }
-    }
-
-    @ReactMethod
-    fun resumePlayer(promise: Promise) {
-        if (mediaPlayer == null) {
-            promise.reject("resume", "mediaPlayer is null on resume.")
-            return
-        }
-
-        if (mediaPlayer!!.isPlaying) {
-            promise.reject("resume", "mediaPlayer is already running.")
-            return
-        }
-
-        try {
-            mediaPlayer!!.seekTo(mediaPlayer!!.currentPosition)
-            mediaPlayer!!.start()
-            promise.resolve("resume player")
-        } catch (e: Exception) {
-            Log.e(tag, "mediaPlayer resume: " + e.message)
-            promise.reject("resume", e.message)
-        }
-    }
-
-    @ReactMethod
-    fun pausePlayer(promise: Promise) {
-        if (mediaPlayer == null) {
-            promise.reject("pausePlay", "mediaPlayer is null on pause.")
-            return
-        }
-
-        try {
-            mediaPlayer!!.pause()
-            promise.resolve("pause player")
-        } catch (e: Exception) {
-            Log.e(tag, "pausePlay exception: " + e.message)
-            promise.reject("pausePlay", e.message)
-        }
-    }
-
-    @ReactMethod
-    fun seekToPlayer(time: Double, promise: Promise) {
-        if (mediaPlayer == null) {
-            promise.reject("seekTo", "mediaPlayer is null on seek.")
-            return
-        }
-
-        mediaPlayer!!.seekTo(time.toInt())
-        promise.resolve("pause player")
-    }
-
-    private fun sendEvent(reactContext: ReactContext,
-                          eventName: String,
-                          params: WritableMap?) {
-        reactContext
-                .getJSModule<RCTDeviceEventEmitter>(RCTDeviceEventEmitter::class.java)
-                .emit(eventName, params)
-    }
-
-    @ReactMethod
-    fun stopPlayer(promise: Promise) {
-        if (mTimer != null) {
-            mTimer!!.cancel()
-        }
-
-        if (mediaPlayer == null) {
-            promise.resolve("Already stopped player")
-            return
-        }
-
-        try {
-            mediaPlayer!!.release()
-            mediaPlayer = null
-            promise.resolve("stopped player")
-        } catch (e: Exception) {
-            Log.e(tag, "stopPlay exception: " + e.message)
-            promise.reject("stopPlay", e.message)
-        }
     }
 
     @ReactMethod
