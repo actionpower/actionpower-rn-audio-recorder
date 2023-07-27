@@ -1,4 +1,4 @@
-package com.dooboolab.audiorecorderplayer
+package com.actionpower.audiorecorder
 
 import android.app.*
 import android.content.Intent

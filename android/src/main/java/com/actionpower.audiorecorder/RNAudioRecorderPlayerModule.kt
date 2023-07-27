@@ -1,4 +1,4 @@
-package com.dooboolab.audiorecorderplayer
+package com.actionpower.audiorecorder
 
 import android.Manifest
 import android.content.Context
@@ -17,7 +17,7 @@ import com.facebook.react.modules.core.DeviceEventManagerModule.RCTDeviceEventEm
 import com.facebook.react.modules.core.PermissionListener
 import kotlin.math.log10
 
-class RNAudioRecorderPlayerModule(private val reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext), PermissionListener, AudioManager.OnAudioFocusChangeListener {
+class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext), PermissionListener, AudioManager.OnAudioFocusChangeListener {
     private var audioFileURL = ""
     private var subsDurationMillis = 500
     private var _meteringEnabled = false
@@ -261,7 +261,7 @@ class RNAudioRecorderPlayerModule(private val reactContext: ReactApplicationCont
     }
 
     companion object {
-        private var tag = "RNAudioRecorderPlayer"
+        private var tag = "RNAudioRecorder"
         private var defaultFileName = "sound.mp4"
     }
 }
