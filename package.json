@@ -1,6 +1,6 @@
 {
   "name": "@actionpower/rn-audio-recorder",
-  "version": "0.0.5",
+  "version": "1.0.0",
   "description": "React Native Audio Recorder",
   "main": "index.ts",
   "types": "index.d.ts",
