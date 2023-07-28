@@ -1,8 +1,8 @@
 import Foundation
 import AVFoundation
 
-@objc(RNAudioRecorderPlayer)
-class RNAudioRecorderPlayer: RCTEventEmitter, AVAudioRecorderDelegate {
+@objc(RNAudioRecorder)
+class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
     var subscriptionDuration: Double = 0.5
     var audioFileURL: URL?
 
