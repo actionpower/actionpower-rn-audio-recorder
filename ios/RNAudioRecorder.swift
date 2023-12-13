@@ -7,9 +7,9 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
     var audioFileURL: URL?
 
     // Recorder
-    var audioRecorder: AVAudioRecorder!
     var audioSession: AVAudioSession!
     var recordTimer: Timer?
+    var audioRecorder = AVAudioRecorder()
     var _meteringEnabled: Bool = false
     var _isPausedByUser: Bool = false
     var _isInterrupted: Bool = false
@@ -221,7 +221,7 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
         audioSession = AVAudioSession.sharedInstance()
 
         do {
-            try audioSession.setCategory(.playAndRecord, mode: avMode, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP, .interruptSpokenAudioAndMixWithOthers])
+            try audioSession.setCategory(.playAndRecord, mode: avMode, options: [.duckOthers, .allowBluetooth, .allowBluetoothA2DP, .interruptSpokenAudioAndMixWithOthers])
             try audioSession.setActive(true)
 
             audioSession.requestRecordPermission { granted in
