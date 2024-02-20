@@ -10,7 +10,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
-import android.media.AudioManager;
+import android.media.AudioManager
 import androidx.core.app.ActivityCompat
 import com.facebook.react.bridge.*
 import com.facebook.react.modules.core.DeviceEventManagerModule.RCTDeviceEventEmitter
@@ -25,20 +25,18 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext), PermissionListener {
-    //AudioManager.OnAudioFocusChangeListener
 
     private var audioFileURL = ""
     private var pausedRecordTime = 0L
     private var totalPausedRecordTime = 0L
     
     private var mediaRecorder: MediaRecorder? = null
+    private var audioManager: AudioManager? = null
     
     private var isPausedByUser = false
-    //private var isPausedByInterrupt = false
     private var isInterrupted = false
 
     private var recordJob: Job? = null
-
 
     
     override fun getName(): String {
@@ -54,47 +52,7 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
                 .getJSModule<RCTDeviceEventEmitter>(RCTDeviceEventEmitter::class.java)
                 .emit(eventName, params)
     }
-/*
-    override fun onAudioFocusChange(focusChange: Int) {
-        when (focusChange) {
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT, AudioManager.AUDIOFOCUS_LOSS, AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                isInterrupted = true
-                if (!isPausedByUser) {
-                    isPausedByInterrupt = true
-                    pauseRecorder(null)
-                    val obj = Arguments.createMap()
-                    obj.putString("status", "paused")
-                    sendEvent(reactContext, "rn-recordback", obj)
-                }
-            }
-            AudioManager.AUDIOFOCUS_GAIN -> {
-                isInterrupted = false
-                if (isPausedByInterrupt) {
-                    isPausedByInterrupt = false
-                    resumeRecorder(null);
-                    val obj = Arguments.createMap()
-                    obj.putString("status", "resume")
-                    sendEvent(reactContext, "rn-recordback", obj)
-                }
-            }
-        }
-    }
 
-    private fun requestAudioFocus(): Boolean {
-        val audioManager = reactContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        val result = audioManager.requestAudioFocus(
-                this,
-                AudioManager.STREAM_MUSIC,
-                AudioManager.AUDIOFOCUS_GAIN
-        )
-        return result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-    }
-
-    private fun abandonAudioFocus() {
-        val audioManager = reactContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        audioManager.abandonAudioFocus(this)
-    }
-*/
     private fun permissionCheck() : Boolean {
         try {
             val permission = arrayOf(
@@ -148,9 +106,12 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
             setAudioSamplingRate(48000)
             setOutputFile(audioFileURL)
         }
+        audioManager = reactContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     }
 
     private fun cancelAll(promise: Promise?) {
+        isInterrupted = false
+        isPausedByUser = false
         runCatching { 
             recordJob?.cancle()
             recordJob = null
@@ -198,10 +159,13 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
 
                     if(Build.VERSION.SDK_INT >= 29) {
                         val isSilenced = mediaRecorder?.activeRecordingConfiguration?.isClientSilenced
-                        if(isSlienced) {
+                        val musicStreamActivated = audioManager?.isMusicActive
+                        if(isSlienced || musicStreamActivated) {
+                            isInterrupted = true
                             obj.putString("status", "paused")
                             sendEvent(reactContext, "rn-recordback", obj)
-                        } else {
+                        } else if(isSilenced == false && musicStreamActivated == false){
+                            isInterrupted = false
                             obj.putString("status", "resume")
                             obj.putInt("currentMetering", dB.toInt())
                             sendEvent(reactContext, "rn-recordback", obj)
@@ -245,10 +209,10 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
             return
         }
 
-        /*if (isInterrupted) {
+        if (isInterrupted) {
             promise?.reject("resumeReocrder", "Recorder is null.")
             return
-        }*/
+        }
 
         try {
             mediaRecorder?.resume()
