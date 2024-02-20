@@ -23,6 +23,11 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import android.content.ServiceConnection
+import android.os.Binder
+import android.os.Build
+import android.os.IBinder
+
 
 class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext), PermissionListener {
 
@@ -38,9 +43,25 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
 
     private var recordJob: Job? = null
 
+    private var binder: ForegroundService.ForegroundBinder? = null
     
     override fun getName(): String {
         return tag
+    }
+
+    private val serviceConnection: ServiceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            binder = service as? ForegroundService.ForegroundBinder
+            binder?.getService()?.let { service ->
+                service.eventPipe = { command ->
+                    val obj = Arguments.createMap()
+                    obj.putString("status", "taskRemoved")
+                    sendEvent(reactContext, "rn-recordback", obj)
+                }
+            }
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {}
     }
 
     private fun sendEvent(
@@ -138,12 +159,18 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
             val serviceIntent = Intent(reactContext, ForegroundService::class.java).apply {
                 putExtra(ForegroundService.STOPWATCH_ACTION, ForegroundService.START)
             }
-
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O){
                 reactContext.startForegroundService(serviceIntent)
             }else{
                 reactContext.startService(serviceIntent)
             }
+
+            context.bindService(
+                serviceIntent,
+                serviceConnection,
+                Context.BIND_AUTO_CREATE
+            )
+            
 
             val systemTime = SystemClock.elapsedRealtime()
             recordJob = null
@@ -195,6 +222,8 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
             isPausedByUser = true
             pausedRecordTime = SystemClock.elapsedRealtime()
             
+            binder?.notifyMessage("녹음 일시정지")
+            
             promise?.resolve("Recorder paused.")
         } catch (e: Exception) {
             Log.e(tag, "pauseRecorder exception: " + e.message)
@@ -220,6 +249,8 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
             isPausedByUser = false            
             totalPausedRecordTime += SystemClock.elapsedRealtime() - pausedRecordTime;
             
+            binder?.notifyMessage("녹음 중")
+
             promise?.resolve("Recorder resumed.")
 
         } catch (e: Exception) {
@@ -244,8 +275,13 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
             promise.reject("stopRecord", stopException.message)
         }
 
+        binder?.notifyMessage("녹음 중단")
+
+        reactContext.unbindService(serviceConnection)
+
         val serviceIntent = Intent(reactContext, ForegroundService::class.java)
         reactContext.stopService(serviceIntent)
+        
         promise.resolve("file:///$audioFileURL")
     }
 

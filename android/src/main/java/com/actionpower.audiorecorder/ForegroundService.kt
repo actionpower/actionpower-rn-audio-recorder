@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import android.os.Binder
 
 class ForegroundService : Service() {
     companion object {
@@ -15,11 +16,19 @@ class ForegroundService : Service() {
 
         // Intent Extras
         const val STOPWATCH_ACTION = "STOPWATCH_ACTION"
+
+        const val NOTIFICATION_ID = 10
     }
 
-    override fun onBind(p0: Intent?): IBinder? {
-        return null
+    var notificationBuilder: NotificationCompat.Builder? = null
+
+    private val binder = ForegroundBinder()
+
+    inner class ForegroundBinder : Binder() {
+        fun getService(): ForegroundService = this@ForegroundService
     }
+
+    override fun onBind(p0: Intent?): IBinder? = binder
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         createNotification()
@@ -56,16 +65,20 @@ class ForegroundService : Service() {
 
         val pendingIntent = PendingIntent.getActivity(applicationContext, 0,
                 openApp, PendingIntent.FLAG_IMMUTABLE)
-        val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
+        notificationBuilder = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_notification)
                 .setColor(Color.parseColor("#007EFF"))
                 .setContentTitle("daglo")
-                .setContentText("녹음 중")
                 .setContentIntent(pendingIntent)
-                .build()
 
-        startForeground(10, notification)
+        notifyMessage("녹음 중")
     }
+
+    fun notifyMessage(message: String) {
+        notificationBuilder?.setContentText(message)
+        startForeground(NOTIFICATION_ID, notificationBuilder?.build())
+    }
+
 
     override fun onDestroy() {
         stopForeground(true)
