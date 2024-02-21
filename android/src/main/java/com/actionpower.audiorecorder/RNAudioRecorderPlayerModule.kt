@@ -81,7 +81,8 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
                 Manifest.permission.WRITE_EXTERNAL_STORAGE,
                 Manifest.permission.FOREGROUND_SERVICE,
                 Manifest.permission.READ_MEDIA_AUDIO,
-                Manifest.permission.FOREGROUND_SERVICE_MICROPHONE
+                Manifest.permission.FOREGROUND_SERVICE_MICROPHONE,
+                Manifest.permission.POST_NOTIFICATIONS
             )
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
