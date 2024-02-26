@@ -19,15 +19,13 @@ import kotlin.math.log10
 
 class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext), PermissionListener {
     private var audioFileURL = ""
-    private var subsDurationMillis = 500
+    private var subsDurationMillis = 500L
     private var mediaRecorder: MediaRecorder? = null
     private var recorderRunnable: Runnable? = null
     private var pausedRecordTime = 0L
     private var totalPausedRecordTime = 0L
-    private var isPausedByUser = false
-    private var isPausedByInterrupt = false
     private var isInterrupted = false
-    var recordHandler: Handler? = Handler(Looper.getMainLooper())
+    private var recordHandler: Handler = Handler(Looper.getMainLooper())
 
     override fun getName(): String {
         return tag
@@ -82,15 +80,17 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
                 setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
                 setAudioEncodingBitRate(128000)
                 setAudioSamplingRate(48000)
-
                 setAudioSource(MediaRecorder.AudioSource.MIC)
                 setOutputFile(audioFileURL)
             }
         }
 
+        recordingTask()
+
         try {
-            mediaRecorder!!.prepare()
             totalPausedRecordTime = 0L
+
+            mediaRecorder!!.prepare()            
             mediaRecorder!!.start()
 
             val serviceIntent = Intent(reactContext, ForegroundService::class.java)
@@ -101,37 +101,45 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
                 reactContext.startService(serviceIntent)
             }
 
-            val systemTime = SystemClock.elapsedRealtime()
-            recorderRunnable = object : Runnable {
-                override fun run() {
-                    val time = SystemClock.elapsedRealtime() - systemTime - totalPausedRecordTime
-                    val obj = Arguments.createMap()
-                    obj.putDouble("currentPosition", time.toDouble())
-
-
-                    var maxAmplitude = 0
-                    if (mediaRecorder != null) {
-                        maxAmplitude = mediaRecorder!!.maxAmplitude
-                    }
-                    var dB = -160.0
-                    val maxAudioSize = 32767.0
-                    if (maxAmplitude > 0) {
-                        dB = 20 * log10(maxAmplitude / maxAudioSize)
-                    }
-                    obj.putInt("currentMetering", dB.toInt())
-                
-
-                    sendEvent(reactContext, "rn-recordback", obj)
-                    recordHandler!!.postDelayed(this, subsDurationMillis.toLong())
-                }
-            }
-            (recorderRunnable as Runnable).run()
-
             promise.resolve("file:///$audioFileURL")
         } catch (e: Exception) {
             Log.e(tag, "Exception: ", e)
             promise.reject("startRecord", e.message)
         }
+    }
+
+    private fun recordingTask() {
+        val systemTime = SystemClock.elapsedRealtime()
+        recorderRunnable = object : Runnable {
+            override fun run() {
+                val time = SystemClock.elapsedRealtime() - systemTime - totalPausedRecordTime
+                val obj = Arguments.createMap().apply {
+                    putDouble("currentPosition", time.toDouble())
+                }
+
+                val maxAmplitude = mediaRecorder?.maxAmplitude
+                val dB = if(maxAmplitude != null && maxAmplitude > 0) { dB = 20 * log10(maxAmplitude / 32767.0) } else -160
+
+                if(Build.VERSION.SDK_INT >= 29) {
+                    val isSilenced = mediaRecorder?.activeRecordingConfiguration?.isClientSilenced
+                    val musicStreamActivated = audioManager?.isMusicActive
+                    if(isSlienced || musicStreamActivated) {
+                        isInterrupted = true
+                        obj.putString("status", "paused")
+                        sendEvent(reactContext, "rn-recordback", obj)
+                    } else if(isSilenced == false && musicStreamActivated == false){
+                        isInterrupted = false
+                        obj.putString("status", "resume")
+                        sendEvent(reactContext, "rn-recordback", obj)
+                    }
+                } else {
+                    obj.putInt("currentMetering", dB.toInt())
+                    sendEvent(reactContext, "rn-recordback", obj)
+                }
+                recordHandler.postDelayed(this, subsDurationMillis)
+            }
+        }
+        recorderRunnable.run()
     }
 
     @ReactMethod
@@ -143,9 +151,7 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
 
         try {
             mediaRecorder!!.pause()
-            isPausedByUser = true
             pausedRecordTime = SystemClock.elapsedRealtime();
-            recorderRunnable?.let { recordHandler!!.removeCallbacks(it) };
             promise?.resolve("Recorder paused.")
         } catch (e: Exception) {
             Log.e(tag, "pauseRecorder exception: " + e.message)
@@ -167,9 +173,7 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
 
         try {
             mediaRecorder!!.resume()
-            isPausedByUser = false
-            totalPausedRecordTime += SystemClock.elapsedRealtime() - pausedRecordTime;
-            recorderRunnable?.let { recordHandler!!.postDelayed(it, subsDurationMillis.toLong()) }
+            totalPausedRecordTime += SystemClock.elapsedRealtime() - pausedRecordTime
             promise?.resolve("Recorder resumed.")
 
         } catch (e: Exception) {
@@ -180,9 +184,7 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
 
     @ReactMethod
     fun stopRecorder(promise: Promise) {
-        if (recordHandler != null) {
-            recorderRunnable?.let { recordHandler!!.removeCallbacks(it) }
-        }
+        recorderRunnable?.let { recordHandler.removeCallbacks(it) }
 
         if (mediaRecorder == null) {
             promise.reject("stopRecord", "recorder is null.")
@@ -190,8 +192,8 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
         }
 
         try {
+            isInterrupted = false
             mediaRecorder!!.stop()
-            abandonAudioFocus()
         } catch (stopException: RuntimeException) {
             stopException.message?.let { Log.d(tag,"" + it) }
             promise.reject("stopRecord", stopException.message)
@@ -206,7 +208,6 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
 
     @ReactMethod
     fun setSubscriptionDuration(sec: Double, promise: Promise) {
-        subsDurationMillis = (sec * 1000).toInt()
         promise.resolve("setSubscriptionDuration: $subsDurationMillis")
     }
 
