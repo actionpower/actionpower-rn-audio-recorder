@@ -58,8 +58,8 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
             // 간섭이 시작될 때 호출됩니다.
             _isInterrupted = true
             if (!_isPausedByUser) {
-                recordTimer?.invalidate()
-                recordTimer = nil;
+//                recordTimer?.invalidate()
+//                recordTimer = nil;
                 _isPausedByInterrupt = true
                 
                 audioRecorder.pause()
@@ -72,9 +72,9 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
                 do {
                     try AVAudioSession.sharedInstance().setActive(true)
                     audioRecorder.record()
-                    if (recordTimer == nil) {
-                        startRecorderTimer()
-                    }
+//                    if (recordTimer == nil) {
+//                        startRecorderTimer()
+//                    }
                     _isPausedByInterrupt = false
                     sendEvent(withName: "rn-recordback", body: ["status": "resume"])
                 } catch {
@@ -313,11 +313,16 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
                 audioRecorder.updateMeters()
                 currentMetering = audioRecorder.averagePower(forChannel: 0)
             }
-
+            
+            let inInputError = isOtherAudioPlaying == false && currentMetering == -120
+            let inSessionError = isOtherAudioPlaying == false && currentMetering == -160
+        
             let status = [
                 "isRecording": audioRecorder.isRecording,
                 "currentPosition": audioRecorder.currentTime * 1000,
                 "currentMetering": currentMetering,
+                "inInputError" : inInputError,
+                "inSessionError" : inSessionError
             ] as [String : Any];
 
             sendEvent(withName: "rn-recordback", body: status)
