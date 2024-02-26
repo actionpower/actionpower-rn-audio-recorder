@@ -17,10 +17,9 @@ import com.facebook.react.modules.core.DeviceEventManagerModule.RCTDeviceEventEm
 import com.facebook.react.modules.core.PermissionListener
 import kotlin.math.log10
 
-class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext), PermissionListener, AudioManager.OnAudioFocusChangeListener {
+class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext), PermissionListener {
     private var audioFileURL = ""
     private var subsDurationMillis = 500
-    private var _meteringEnabled = false
     private var mediaRecorder: MediaRecorder? = null
     private var recorderRunnable: Runnable? = null
     private var pausedRecordTime = 0L
@@ -42,48 +41,18 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
                 .emit(eventName, params)
     }
 
-    override fun onAudioFocusChange(focusChange: Int) {
-        when (focusChange) {
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT, AudioManager.AUDIOFOCUS_LOSS, AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                isInterrupted = true
-                if (!isPausedByUser) {
-                    isPausedByInterrupt = true
-                    pauseRecorder(null)
-                    val obj = Arguments.createMap()
-                    obj.putString("status", "paused")
-                    sendEvent(reactContext, "rn-recordback", obj)
-                }
-            }
-            AudioManager.AUDIOFOCUS_GAIN -> {
-                isInterrupted = false
-                if (isPausedByInterrupt) {
-                    isPausedByInterrupt = false
-                    resumeRecorder(null);
-                    val obj = Arguments.createMap()
-                    obj.putString("status", "resume")
-                    sendEvent(reactContext, "rn-recordback", obj)
-                }
-            }
-        }
-    }
-
-    private fun requestAudioFocus(): Boolean {
-        val audioManager = reactContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        val result = audioManager.requestAudioFocus(
-                this,
-                AudioManager.STREAM_MUSIC,
-                AudioManager.AUDIOFOCUS_GAIN
-        )
-        return result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-    }
-
-    private fun abandonAudioFocus() {
-        val audioManager = reactContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        audioManager.abandonAudioFocus(this)
-    }
-
     @ReactMethod
     fun startRecorder(path: String, audioSet: ReadableMap?, meteringEnabled: Boolean, promise: Promise) {
+
+        val permission = arrayOf(
+            Manifest.permission.RECORD_AUDIO,
+            Manifest.permission.WRITE_EXTERNAL_STORAGE,
+            Manifest.permission.FOREGROUND_SERVICE,
+            Manifest.permission.READ_MEDIA_AUDIO,
+            Manifest.permission.FOREGROUND_SERVICE_MICROPHONE,
+            Manifest.permission.POST_NOTIFICATIONS
+        )
+
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 // TIRAMISU (33)
@@ -91,13 +60,11 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
                 if (Build.VERSION.SDK_INT < 33 &&
                         (ActivityCompat.checkSelfPermission(reactContext, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED ||
                                 ActivityCompat.checkSelfPermission(reactContext, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED))  {
-                    ActivityCompat.requestPermissions((currentActivity)!!, arrayOf(
-                            Manifest.permission.RECORD_AUDIO,
-                            Manifest.permission.WRITE_EXTERNAL_STORAGE), 0)
+                    ActivityCompat.requestPermissions((currentActivity)!!, permission, 0)
                     promise.reject("No permission granted.", "Try again after adding permission.")
                     return
                 } else if (ActivityCompat.checkSelfPermission(reactContext, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                    ActivityCompat.requestPermissions((currentActivity)!!, arrayOf(Manifest.permission.RECORD_AUDIO), 0)
+                    ActivityCompat.requestPermissions((currentActivity)!!, permission, 0)
                     promise.reject("No permission granted.", "Try again after adding permission.")
                     return
                 }
@@ -108,32 +75,23 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
             return
         }
         audioFileURL = if (((path == "DEFAULT"))) "${reactContext.cacheDir}/$defaultFileName" else path
-        _meteringEnabled = meteringEnabled
 
         if (mediaRecorder == null) {
-            mediaRecorder = MediaRecorder()
-        }
+            mediaRecorder = MediaRecorder().apply{ 
+                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                setAudioEncodingBitRate(128000)
+                setAudioSamplingRate(48000)
 
-        if (audioSet != null) {
-            mediaRecorder!!.setAudioSource(if (audioSet.hasKey("AudioSourceAndroid")) audioSet.getInt("AudioSourceAndroid") else MediaRecorder.AudioSource.MIC)
-            mediaRecorder!!.setOutputFormat(if (audioSet.hasKey("OutputFormatAndroid")) audioSet.getInt("OutputFormatAndroid") else MediaRecorder.OutputFormat.MPEG_4)
-            mediaRecorder!!.setAudioEncoder(if (audioSet.hasKey("AudioEncoderAndroid")) audioSet.getInt("AudioEncoderAndroid") else MediaRecorder.AudioEncoder.AAC)
-            mediaRecorder!!.setAudioSamplingRate(if (audioSet.hasKey("AudioSamplingRateAndroid")) audioSet.getInt("AudioSamplingRateAndroid") else 48000)
-            mediaRecorder!!.setAudioEncodingBitRate(if (audioSet.hasKey("AudioEncodingBitRateAndroid")) audioSet.getInt("AudioEncodingBitRateAndroid") else 128000)
-        } else {
-            mediaRecorder!!.setAudioSource(MediaRecorder.AudioSource.MIC)
-            mediaRecorder!!.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-            mediaRecorder!!.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-            mediaRecorder!!.setAudioEncodingBitRate(128000)
-            mediaRecorder!!.setAudioSamplingRate(48000)
+                setAudioSource(MediaRecorder.AudioSource.MIC)
+                setOutputFile(audioFileURL)
+            }
         }
-        mediaRecorder!!.setOutputFile(audioFileURL)
 
         try {
             mediaRecorder!!.prepare()
             totalPausedRecordTime = 0L
             mediaRecorder!!.start()
-            requestAudioFocus()
 
             val serviceIntent = Intent(reactContext, ForegroundService::class.java)
             serviceIntent.putExtra(ForegroundService.STOPWATCH_ACTION, ForegroundService.START)
@@ -149,18 +107,20 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
                     val time = SystemClock.elapsedRealtime() - systemTime - totalPausedRecordTime
                     val obj = Arguments.createMap()
                     obj.putDouble("currentPosition", time.toDouble())
-                    if (_meteringEnabled) {
-                        var maxAmplitude = 0
-                        if (mediaRecorder != null) {
-                            maxAmplitude = mediaRecorder!!.maxAmplitude
-                        }
-                        var dB = -160.0
-                        val maxAudioSize = 32767.0
-                        if (maxAmplitude > 0) {
-                            dB = 20 * log10(maxAmplitude / maxAudioSize)
-                        }
-                        obj.putInt("currentMetering", dB.toInt())
+
+
+                    var maxAmplitude = 0
+                    if (mediaRecorder != null) {
+                        maxAmplitude = mediaRecorder!!.maxAmplitude
                     }
+                    var dB = -160.0
+                    val maxAudioSize = 32767.0
+                    if (maxAmplitude > 0) {
+                        dB = 20 * log10(maxAmplitude / maxAudioSize)
+                    }
+                    obj.putInt("currentMetering", dB.toInt())
+                
+
                     sendEvent(reactContext, "rn-recordback", obj)
                     recordHandler!!.postDelayed(this, subsDurationMillis.toLong())
                 }
