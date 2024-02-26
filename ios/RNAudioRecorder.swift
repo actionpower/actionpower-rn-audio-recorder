@@ -3,19 +3,20 @@ import AVFoundation
 
 @objc(RNAudioRecorder)
 class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
-    var audioFileURL: URL?
     var subscriptionDuration: Double = 0.5
+    var audioFileURL: URL?
 
+    // Recorder
     var audioSession: AVAudioSession!
     var recordTimer: Timer?
-    var audioRecorder: AVAudioRecorder!
+    var audioRecorder = AVAudioRecorder()
     var _meteringEnabled: Bool = false
     var _isPausedByUser: Bool = false
     var _isInterrupted: Bool = false
     var _isPausedByInterrupt: Bool = false
 
     override static func requiresMainQueueSetup() -> Bool {
-        return true
+      return true
     }
 
     override func supportedEvents() -> [String]! {
@@ -57,8 +58,8 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
         case .began:
             _isInterrupted = true
             if (!_isPausedByUser) {
-                recordTimer?.invalidate()
-                recordTimer = nil;
+//                recordTimer?.invalidate()
+//                recordTimer = nil;
                 _isPausedByInterrupt = true
                 audioRecorder.pause()
                 sendEvent(withName: "rn-recordback", body: ["status": "pausedByNative"])
@@ -67,19 +68,13 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
             _isInterrupted = false
             if (_isPausedByInterrupt) {
                 do {
-                    if (recordTimer == nil) {
-                        startRecorderTimer()
-                    }
+                    try AVAudioSession.sharedInstance().setActive(true)
+                    audioRecorder.record()
+//                    if (recordTimer == nil) {
+//                        startRecorderTimer()
+//                    }
                     _isPausedByInterrupt = false
-                    if let optionsRawValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt {
-                        let options = AVAudioSession.InterruptionOptions(rawValue: optionsRawValue)
-                        if options.contains(.shouldResume) {
-                            audioRecorder.record()
-                            sendEvent(withName: "rn-recordback", body: ["status": "resumeByNative"])
-                        } else {
-                            sendEvent(withName: "rn-recordback", body: ["status": "failResumeByNative"])
-                        }
-                    }
+                    sendEvent(withName: "rn-recordback", body: ["status": "resumeByNative"])
                 } catch {
                     print("Failed to activate audio session or resume recording.")
                 }
@@ -91,7 +86,7 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
     
     @objc(startRecorder:audioSets:meteringEnabled:resolve:reject:)
     func startRecorder(path: String,  audioSets: [String: Any], meteringEnabled: Bool, resolve: @escaping RCTPromiseResolveBlock,
-                       rejecter reject: @escaping RCTPromiseRejectBlock) -> Void {
+       rejecter reject: @escaping RCTPromiseRejectBlock) -> Void {
 
         _meteringEnabled = meteringEnabled;
 
@@ -253,14 +248,6 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
 
         audioRecorder.stop()
 
-        do {
-            try audioSession.setCategory(.playback)
-        } catch {
-            print("DEBUG : \(error.localizedDescription)")
-        }
-        
-        _isPausedByUser = false
-
         if (recordTimer != nil) {
             recordTimer!.invalidate()
             recordTimer = nil
@@ -287,7 +274,6 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
         _isPausedByUser = true
 
         audioRecorder.pause()
-        controlSessionActivation(false)
         resolve("Recorder paused!")
     }
 
@@ -302,10 +288,6 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
         
         if (_isPausedByInterrupt || _isInterrupted) {
             return reject("RNAudioPlayerRecorder", "Recorder is nil", nil)
-        }
-
-        if (audioSession.isOtherAudioPlaying && !audioRecorder.isRecording) {
-            return reject("RNAudioPlayerRecorder", "Don't resume", nil)
         }
         
 
@@ -329,26 +311,28 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
                 audioRecorder.updateMeters()
                 currentMetering = audioRecorder.averagePower(forChannel: 0)
             }
+            
+            let inInputError = isOtherAudioPlaying == false && currentMetering == -120
+            let inSessionError = isOtherAudioPlaying == false && currentMetering == -160
         
             let status = [
                 "isRecording": audioRecorder.isRecording,
                 "currentPosition": audioRecorder.currentTime * 1000,
                 "currentMetering": currentMetering,
+                "inInputError" : inInputError,
+                "inSessionError" : inSessionError
             ] as [String : Any];
             
             let isOtherAudioPlaying = audioSession.isOtherAudioPlaying
-            let isEndInterrupted = isOtherAudioPlaying == false && _isInterrupted == false
-            let isError = (currentMetering == -120 || currentMetering == -160) && isEndInterrupted
-            let isRecording = audioRecorder.isRecording
             
-//            if isError {
-//                reactivateRecord()
-//                sendEvent(withName: "rn-recordback", body: ["status": "tryReactiveByNative"])
-//            }
+            let inInputError = isOtherAudioPlaying == false && currentMetering == -120 && _isInterrupted == false
+            let inSessionError = isOtherAudioPlaying == false && currentMetering == -160 && _isInterrupted == false
             
-            if isRecording {
-                sendEvent(withName: "rn-recordback", body: status)
+            if inInputError || inSessionError {
+                sendEvent(withName: "rn-recordback", body: ["status": "resumeByNative"])
             }
+            
+            sendEvent(withName: "rn-recordback", body: status)
         }
     }
 
@@ -368,65 +352,6 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
     func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
         if !flag {
             print("Failed to stop recorder")
-        }
-    }
-    
-    func reactivateRecord() {
-        pausedByNative()
-        resumeByNative()
-    }
-    
-    
-    func resumeByNative() {
-        if !audioRecorder.isRecording {
-            audioRecorder.record()
-        }
-    }
-    
-    func pausedByNative() {
-        audioRecorder.pause()
-    }
-    
-    func controlSessionActivation(_ active: Bool) {
-        do {
-            try audioSession.setActive(active, options: .notifyOthersOnDeactivation)
-        } catch let error as NSError {
-            if let errorCode = AVAudioSession.ErrorCode(rawValue: error.code) {
-                switch errorCode {
-                case .badParam:
-                    print("badParam")
-                case .cannotInterruptOthers:
-                    print("cannotInterruptOthers")
-                case .cannotStartPlaying:
-                    print("cannotStartPlaying")
-                case .cannotStartRecording:
-                    print("cannotStartRecording")
-                case .expiredSession:
-                    print("expiredSession")
-                case .incompatibleCategory:
-                    print("incompatibleCategory")
-                case .insufficientPriority:
-                    print("insufficientPriority")
-                case .isBusy:
-                    print("isBusy")
-                case .mediaServicesFailed:
-                    print("mediaServicesFailed")
-                case .missingEntitlement:
-                    print("missingEntitlement")
-                case .none:
-                    print("none")
-                case .resourceNotAvailable:
-                    print("resourceNotAvailable")
-                case .sessionNotActive:
-                    print("sessionNotActive")
-                case .siriIsRecording:
-                    print("siriIsRecording")
-                case .unspecified:
-                    print("unspecified")
-                @unknown default:
-                    fatalError()
-                }
-            }
         }
     }
 }
