@@ -20,11 +20,13 @@ import kotlin.math.log10
 class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext), PermissionListener {
     private var audioFileURL = ""
     private var subsDurationMillis = 500L
-    private var mediaRecorder: MediaRecorder? = null
-    private var recorderRunnable: Runnable? = null
     private var pausedRecordTime = 0L
     private var totalPausedRecordTime = 0L
     private var isInterrupted = false
+
+    private var mediaRecorder: MediaRecorder? = null
+    private var recorderRunnable: Runnable? = null
+    private var audioManager: AudioManager? = null
     private var recordHandler: Handler = Handler(Looper.getMainLooper())
 
     override fun getName(): String {
@@ -35,8 +37,8 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
                           eventName: String,
                           params: WritableMap?) {
         reactContext
-                .getJSModule<RCTDeviceEventEmitter>(RCTDeviceEventEmitter::class.java)
-                .emit(eventName, params)
+            .getJSModule<RCTDeviceEventEmitter>(RCTDeviceEventEmitter::class.java)
+            .emit(eventName, params)
     }
 
     @ReactMethod
@@ -47,7 +49,6 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
             Manifest.permission.WRITE_EXTERNAL_STORAGE,
             Manifest.permission.FOREGROUND_SERVICE,
             Manifest.permission.READ_MEDIA_AUDIO,
-            Manifest.permission.FOREGROUND_SERVICE_MICROPHONE,
             Manifest.permission.POST_NOTIFICATIONS
         )
 
@@ -56,8 +57,8 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
                 // TIRAMISU (33)
                 // https://github.com/hyochan/react-native-audio-recorder-player/issues/503
                 if (Build.VERSION.SDK_INT < 33 &&
-                        (ActivityCompat.checkSelfPermission(reactContext, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED ||
-                                ActivityCompat.checkSelfPermission(reactContext, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED))  {
+                    (ActivityCompat.checkSelfPermission(reactContext, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED ||
+                            ActivityCompat.checkSelfPermission(reactContext, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED))  {
                     ActivityCompat.requestPermissions((currentActivity)!!, permission, 0)
                     promise.reject("No permission granted.", "Try again after adding permission.")
                     return
@@ -75,22 +76,23 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
         audioFileURL = if (((path == "DEFAULT"))) "${reactContext.cacheDir}/$defaultFileName" else path
 
         if (mediaRecorder == null) {
-            mediaRecorder = MediaRecorder().apply{ 
-                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                setAudioEncodingBitRate(128000)
-                setAudioSamplingRate(48000)
-                setAudioSource(MediaRecorder.AudioSource.MIC)
-                setOutputFile(audioFileURL)
-            }
+            mediaRecorder = MediaRecorder()
         }
 
+        mediaRecorder!!.setAudioSource(MediaRecorder.AudioSource.MIC)
+        mediaRecorder!!.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+        mediaRecorder!!.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+        mediaRecorder!!.setAudioEncodingBitRate(128000)
+        mediaRecorder!!.setAudioSamplingRate(48000)
+        mediaRecorder!!.setOutputFile(audioFileURL)
+
+        audioManager = reactContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         recordingTask()
 
         try {
             totalPausedRecordTime = 0L
 
-            mediaRecorder!!.prepare()            
+            mediaRecorder!!.prepare()
             mediaRecorder!!.start()
 
             val serviceIntent = Intent(reactContext, ForegroundService::class.java)
@@ -118,19 +120,28 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
                 }
 
                 val maxAmplitude = mediaRecorder?.maxAmplitude
-                val dB = if(maxAmplitude != null && maxAmplitude > 0) { dB = 20 * log10(maxAmplitude / 32767.0) } else -160
+                val dB = if(maxAmplitude != null && maxAmplitude > 0) { 20 * log10(maxAmplitude / 32767.0) } else -160
 
                 if(Build.VERSION.SDK_INT >= 29) {
-                    val isSilenced = mediaRecorder?.activeRecordingConfiguration?.isClientSilenced
-                    val musicStreamActivated = audioManager?.isMusicActive
-                    if(isSlienced || musicStreamActivated) {
-                        isInterrupted = true
-                        obj.putString("status", "paused")
-                        sendEvent(reactContext, "rn-recordback", obj)
-                    } else if(isSilenced == false && musicStreamActivated == false){
-                        isInterrupted = false
-                        obj.putString("status", "resume")
-                        sendEvent(reactContext, "rn-recordback", obj)
+                    kotlin.runCatching {
+                        val isSilenced = mediaRecorder?.activeRecordingConfiguration?.isClientSilenced ?: false
+                        val musicStreamActivated = audioManager?.isMusicActive ?: false
+                        if(isSilenced || musicStreamActivated) {
+                            if (!isInterrupted) {
+                                obj.putString("status", "paused")
+                                sendEvent(reactContext, "rn-recordback", obj)
+                                isInterrupted = true
+                            }
+                        } else if(isSilenced == false && musicStreamActivated == false){
+                            if(isInterrupted) {
+                                isInterrupted = false
+                                obj.putString("status", "resume")
+                            }
+                            obj.putInt("currentMetering", dB.toInt())
+                            sendEvent(reactContext, "rn-recordback", obj)
+                        }
+                    }.onFailure {
+                        Log.d(tag, it.message ?: "")
                     }
                 } else {
                     obj.putInt("currentMetering", dB.toInt())
@@ -139,7 +150,7 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
                 recordHandler.postDelayed(this, subsDurationMillis)
             }
         }
-        recorderRunnable.run()
+        (recorderRunnable as Runnable).run()
     }
 
     @ReactMethod
