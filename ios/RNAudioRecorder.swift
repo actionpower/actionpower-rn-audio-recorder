@@ -63,7 +63,7 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
                 _isPausedByInterrupt = true
                 
                 audioRecorder.pause()
-                sendEvent(withName: "rn-recordback", body: ["status": "paused"])
+                sendEvent(withName: "rn-recordback", body: ["status": "pausedByNative"])
             }
         case .ended:
             // 간섭이 끝날 때 호출됩니다.
@@ -76,7 +76,7 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
 //                        startRecorderTimer()
 //                    }
                     _isPausedByInterrupt = false
-                    sendEvent(withName: "rn-recordback", body: ["status": "resume"])
+                    sendEvent(withName: "rn-recordback", body: ["status": "resumeByNative"])
                 } catch {
                     print("Failed to activate audio session or resume recording.")
                 }
@@ -313,18 +313,20 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
                 audioRecorder.updateMeters()
                 currentMetering = audioRecorder.averagePower(forChannel: 0)
             }
-            
-            let inInputError = isOtherAudioPlaying == false && currentMetering == -120
-            let inSessionError = isOtherAudioPlaying == false && currentMetering == -160
         
             let status = [
                 "isRecording": audioRecorder.isRecording,
                 "currentPosition": audioRecorder.currentTime * 1000,
                 "currentMetering": currentMetering,
-                "inInputError" : inInputError,
-                "inSessionError" : inSessionError
             ] as [String : Any];
-
+            
+            let inInputError = isOtherAudioPlaying == false && currentMetering == -120
+            let inSessionError = isOtherAudioPlaying == false && currentMetering == -160
+            
+            if inInputError || inSessionError {
+                sendEvent(withName: "rn-recordback", body: ["status": "resumeByNative"])
+            }
+            
             sendEvent(withName: "rn-recordback", body: status)
         }
     }
