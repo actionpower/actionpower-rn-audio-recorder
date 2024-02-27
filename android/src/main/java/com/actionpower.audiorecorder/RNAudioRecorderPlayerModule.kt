@@ -130,7 +130,7 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
                     }
 
                     val maxAmplitude = mediaRecorder?.maxAmplitude ?: 0
-                    val dB = if(maxAmplitude != null && maxAmplitude > 0) { 20 * log10(maxAmplitude / 32767.0) } else -160
+                    val dB = if(maxAmplitude != null && maxAmplitude > 0) { 20 * log10(maxAmplitude / 32767.0) } else -160.0
 
                     val musicStreamActivated = audioManager?.isMusicActive ?: false
                     var isSilenced = false
@@ -138,7 +138,7 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
                     if(Build.VERSION.SDK_INT >= 29) {
                         isSilenced = mediaRecorder?.activeRecordingConfiguration?.isClientSilenced ?: false        
                     } else {
-                        if (dB <= -160) {
+                        if (dB <= -160.0) {
                             if (amplitudeZeroCount > 10) isSilenced = true
                             else amplitudeZeroCount++
                         } else {
