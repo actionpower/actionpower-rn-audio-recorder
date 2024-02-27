@@ -121,8 +121,9 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
         recorderRunnable = object : Runnable {
             override fun run() {
 
-                if(isUserInterrupted) return
                 kotlin.runCatching {
+                    if(isUserInterrupted) return@runCatching
+
                     val time = SystemClock.elapsedRealtime() - systemTime - totalPausedRecordTime
                     val obj = Arguments.createMap().apply {
                         putDouble("currentPosition", time.toDouble())
