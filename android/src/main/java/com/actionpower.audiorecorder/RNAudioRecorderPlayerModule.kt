@@ -23,6 +23,7 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
     private var pausedRecordTime = 0L
     private var totalPausedRecordTime = 0L
     private var isInterrupted = false
+    private var isUserInterrupted = false
 
     private var mediaRecorder: MediaRecorder? = null
     private var recorderRunnable: Runnable? = null
@@ -75,25 +76,29 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
         }
         audioFileURL = if (((path == "DEFAULT"))) "${reactContext.cacheDir}/$defaultFileName" else path
 
-        if (mediaRecorder == null) {
-            mediaRecorder = MediaRecorder()
-        }
+        mediaRecorder = MediaRecorder().apply {
+                setAudioSource(MediaRecorder.AudioSource.MIC)
+                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                setAudioEncodingBitRate(128000)
+                setAudioSamplingRate(48000)
+                setOutputFile(audioFileURL)
+            }
 
-        mediaRecorder!!.setAudioSource(MediaRecorder.AudioSource.MIC)
-        mediaRecorder!!.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-        mediaRecorder!!.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-        mediaRecorder!!.setAudioEncodingBitRate(128000)
-        mediaRecorder!!.setAudioSamplingRate(48000)
-        mediaRecorder!!.setOutputFile(audioFileURL)
+        
 
         audioManager = reactContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        recordingTask()
 
         try {
             totalPausedRecordTime = 0L
 
-            mediaRecorder!!.prepare()
-            mediaRecorder!!.start()
+            isUserInterrupted = false
+            isInterrupted = false
+
+            mediaRecorder?.prepare()
+            mediaRecorder?.start()
+
+            recordingTask()
 
             val serviceIntent = Intent(reactContext, ForegroundService::class.java)
             serviceIntent.putExtra(ForegroundService.STOPWATCH_ACTION, ForegroundService.START)
@@ -114,6 +119,9 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
         val systemTime = SystemClock.elapsedRealtime()
         recorderRunnable = object : Runnable {
             override fun run() {
+
+                if(isUserInterrupted) return
+
                 val time = SystemClock.elapsedRealtime() - systemTime - totalPausedRecordTime
                 val obj = Arguments.createMap().apply {
                     putDouble("currentPosition", time.toDouble())
@@ -128,14 +136,16 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
                         val musicStreamActivated = audioManager?.isMusicActive ?: false
                         if(isSilenced || musicStreamActivated) {
                             if (!isInterrupted) {
-                                obj.putString("status", "paused")
+                                obj.putString("status", "pausedByNative")
                                 sendEvent(reactContext, "rn-recordback", obj)
                                 isInterrupted = true
+                                pauseTask()
                             }
                         } else if(isSilenced == false && musicStreamActivated == false){
                             if(isInterrupted) {
                                 isInterrupted = false
-                                obj.putString("status", "resume")
+                                obj.putString("status", "resumeByNative")
+                                resumeTask()
                             }
                             obj.putInt("currentMetering", dB.toInt())
                             sendEvent(reactContext, "rn-recordback", obj)
@@ -160,14 +170,20 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
             return
         }
 
-        try {
-            mediaRecorder!!.pause()
-            pausedRecordTime = SystemClock.elapsedRealtime();
+        isUserInterrupted = true
+
+        kotlin.runCatching {
+            pauseTask()
             promise?.resolve("Recorder paused.")
-        } catch (e: Exception) {
+        }.onFailure { e ->
             Log.e(tag, "pauseRecorder exception: " + e.message)
             promise?.reject("pauseRecorder", e.message)
         }
+    }
+
+    private fun pauseTask() {
+        mediaRecorder?.pause()
+        pausedRecordTime = SystemClock.elapsedRealtime()
     }
 
     @ReactMethod
@@ -182,15 +198,20 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
             return
         }
 
-        try {
-            mediaRecorder!!.resume()
-            totalPausedRecordTime += SystemClock.elapsedRealtime() - pausedRecordTime
-            promise?.resolve("Recorder resumed.")
+        isUserInterrupted = false
 
-        } catch (e: Exception) {
+        kotlin.runCatching {
+            resumeTask()
+            promise?.resolve("Recorder resumed.")
+        }.onFailure { e ->
             Log.e(tag, "Recorder resume: " + e.message)
             promise?.reject("resumeRecorder", e.message)
         }
+    }
+
+    private fun resumeTask() {
+        mediaRecorder?.resume()
+        totalPausedRecordTime += SystemClock.elapsedRealtime() - pausedRecordTime
     }
 
     @ReactMethod
@@ -203,15 +224,17 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
         }
 
         try {
+            mediaRecorder?.stop()
+            isUserInterrupted = false
             isInterrupted = false
-            mediaRecorder!!.stop()
         } catch (stopException: RuntimeException) {
             stopException.message?.let { Log.d(tag,"" + it) }
             promise.reject("stopRecord", stopException.message)
         }
 
-        mediaRecorder!!.release()
+        mediaRecorder?.release()
         mediaRecorder = null
+
         val serviceIntent = Intent(reactContext, ForegroundService::class.java)
         reactContext.stopService(serviceIntent)
         promise.resolve("file:///$audioFileURL")
