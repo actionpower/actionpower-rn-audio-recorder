@@ -24,6 +24,7 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
     private var totalPausedRecordTime = 0L
     private var isInterrupted = false
     private var isUserInterrupted = false
+    private var amplitudeZeroCount = 0
 
     private var mediaRecorder: MediaRecorder? = null
     private var recorderRunnable: Runnable? = null
@@ -121,42 +122,51 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
             override fun run() {
 
                 if(isUserInterrupted) return
-
-                val time = SystemClock.elapsedRealtime() - systemTime - totalPausedRecordTime
-                val obj = Arguments.createMap().apply {
-                    putDouble("currentPosition", time.toDouble())
-                }
-
-                val maxAmplitude = mediaRecorder?.maxAmplitude
-                val dB = if(maxAmplitude != null && maxAmplitude > 0) { 20 * log10(maxAmplitude / 32767.0) } else -160
-
-                if(Build.VERSION.SDK_INT >= 29) {
-                    kotlin.runCatching {
-                        val isSilenced = mediaRecorder?.activeRecordingConfiguration?.isClientSilenced ?: false
-                        val musicStreamActivated = audioManager?.isMusicActive ?: false
-                        if(isSilenced || musicStreamActivated) {
-                            if (!isInterrupted) {
-                                obj.putString("status", "pausedByNative")
-                                sendEvent(reactContext, "rn-recordback", obj)
-                                isInterrupted = true
-                                pauseTask()
-                            }
-                        } else if(isSilenced == false && musicStreamActivated == false){
-                            if(isInterrupted) {
-                                isInterrupted = false
-                                obj.putString("status", "resumeByNative")
-                                resumeTask()
-                            }
-                            obj.putInt("currentMetering", dB.toInt())
-                            sendEvent(reactContext, "rn-recordback", obj)
-                        }
-                    }.onFailure {
-                        Log.d(tag, it.message ?: "")
+                kotlin.runCatching {
+                    val time = SystemClock.elapsedRealtime() - systemTime - totalPausedRecordTime
+                    val obj = Arguments.createMap().apply {
+                        putDouble("currentPosition", time.toDouble())
                     }
-                } else {
-                    obj.putInt("currentMetering", dB.toInt())
-                    sendEvent(reactContext, "rn-recordback", obj)
+
+                    val maxAmplitude = mediaRecorder?.maxAmplitude ?: 0
+                    val dB = if(maxAmplitude != null && maxAmplitude > 0) { 20 * log10(maxAmplitude / 32767.0) } else -160
+
+                    val musicStreamActivated = audioManager?.isMusicActive ?: false
+                    var isSilenced = false
+
+                    if(Build.VERSION.SDK_INT >= 29) {
+                        isSilenced = mediaRecorder?.activeRecordingConfiguration?.isClientSilenced ?: false        
+                    } else {
+                        if (dB <= -160) {
+                            if (amplitudeZeroCount > 10) isSilenced = true
+                            else amplitudeZeroCount++
+                        } else {
+                            amplitudeZeroCount = 0
+                            isSilenced = false
+                        }    
+
+                        obj.putInt("currentMetering", dB.toInt())
+                        sendEvent(reactContext, "rn-recordback", obj)
+                    }
+
+                    if(isSilenced || musicStreamActivated) {
+                        if (!isInterrupted) {
+                            obj.putString("status", "pausedByNative")
+                            sendEvent(reactContext, "rn-recordback", obj)
+                            isInterrupted = true
+                            pauseTask()
+                        }
+                    } else if(isSilenced == false && musicStreamActivated == false){
+                        if(isInterrupted) {
+                            isInterrupted = false
+                            obj.putString("status", "resumeByNative")
+                            resumeTask()
+                        }
+                        obj.putInt("currentMetering", dB.toInt())
+                        sendEvent(reactContext, "rn-recordback", obj)
+                    }
                 }
+
                 recordHandler.postDelayed(this, subsDurationMillis)
             }
         }
