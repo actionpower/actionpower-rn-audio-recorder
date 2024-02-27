@@ -311,22 +311,15 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
                 audioRecorder.updateMeters()
                 currentMetering = audioRecorder.averagePower(forChannel: 0)
             }
-            
-            let inInputError = isOtherAudioPlaying == false && currentMetering == -120
-            let inSessionError = isOtherAudioPlaying == false && currentMetering == -160
         
             let status = [
                 "isRecording": audioRecorder.isRecording,
                 "currentPosition": audioRecorder.currentTime * 1000,
                 "currentMetering": currentMetering,
-                "inInputError" : inInputError,
-                "inSessionError" : inSessionError
             ] as [String : Any];
             
-            let isOtherAudioPlaying = audioSession.isOtherAudioPlaying
-            
-            let inInputError = isOtherAudioPlaying == false && currentMetering == -120 && _isInterrupted == false
-            let inSessionError = isOtherAudioPlaying == false && currentMetering == -160 && _isInterrupted == false
+            let inInputError = isOtherAudioPlaying == false && currentMetering == -120
+            let inSessionError = isOtherAudioPlaying == false && currentMetering == -160
             
             if inInputError || inSessionError {
                 sendEvent(withName: "rn-recordback", body: ["status": "resumeByNative"])
