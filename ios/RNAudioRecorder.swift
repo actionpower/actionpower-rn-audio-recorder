@@ -58,8 +58,8 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
         case .began:
             _isInterrupted = true
             if (!_isPausedByUser) {
-//                recordTimer?.invalidate()
-//                recordTimer = nil;
+                recordTimer?.invalidate()
+                recordTimer = nil;
                 _isPausedByInterrupt = true
                 audioRecorder.pause()
                 sendEvent(withName: "rn-recordback", body: ["status": "pausedByNative"])
@@ -68,13 +68,19 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
             _isInterrupted = false
             if (_isPausedByInterrupt) {
                 do {
-                    try AVAudioSession.sharedInstance().setActive(true)
-                    audioRecorder.record()
-//                    if (recordTimer == nil) {
-//                        startRecorderTimer()
-//                    }
+                    if (recordTimer == nil) {
+                        startRecorderTimer()
+                    }
                     _isPausedByInterrupt = false
-                    sendEvent(withName: "rn-recordback", body: ["status": "resumeByNative"])
+                    if let optionsRawValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt {
+                        let options = AVAudioSession.InterruptionOptions(rawValue: optionsRawValue)
+                        if options.contains(.shouldResume) {
+                            audioRecorder.record()
+                            sendEvent(withName: "rn-recordback", body: ["status": "resumeByNative"])
+                        } else {
+                            sendEvent(withName: "rn-recordback", body: ["status": "failResumeByNative"])
+                        }
+                    }
                 } catch {
                     print("Failed to activate audio session or resume recording.")
                 }
@@ -318,14 +324,19 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
                 "currentMetering": currentMetering,
             ] as [String : Any];
             
-            let inInputError = isOtherAudioPlaying == false && currentMetering == -120
-            let inSessionError = isOtherAudioPlaying == false && currentMetering == -160
+            let isOtherAudioPlaying = audioSession.isOtherAudioPlaying
+            let isEndInterrupted = isOtherAudioPlaying == false && _isInterrupted == false
+            let isError = (currentMetering == -120 || currentMetering == -160) && isEndInterrupted
+            let pausedRecording = audioRecorder.isRecording
             
-            if inInputError || inSessionError {
-                sendEvent(withName: "rn-recordback", body: ["status": "resumeByNative"])
+//            if isError && !pausedRecording {
+//                reactivateRecord()
+//                sendEvent(withName: "rn-recordback", body: ["status": "tryReactiveByNative"])
+//            }
+            
+            if audioRecorder.isRecording {
+                sendEvent(withName: "rn-recordback", body: status)
             }
-            
-            sendEvent(withName: "rn-recordback", body: status)
         }
     }
 
@@ -347,4 +358,67 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
             print("Failed to stop recorder")
         }
     }
+    
+    func reactivateRecord() {
+        pausedByNative()
+        resumeByNative()
+    }
+    
+    
+    func resumeByNative() {
+        if !audioRecorder.isRecording {
+            audioRecorder.record()
+        }
+    }
+    
+    func pausedByNative() {
+        if audioRecorder.isRecording {
+            audioRecorder.pause()
+        }
+    }
+    
+    func controlSessionActivation(_ active: Bool) {
+        do {
+            try audioSession.setActive(active, options: .notifyOthersOnDeactivation)
+        } catch let error as NSError {
+            if let errorCode = AVAudioSession.ErrorCode(rawValue: error.code) {
+                switch errorCode {
+                case .badParam:
+                    checkLogLine("badParam")
+                case .cannotInterruptOthers:
+                    checkLogLine("cannotInterruptOthers")
+                case .cannotStartPlaying:
+                    checkLogLine("cannotStartPlaying")
+                case .cannotStartRecording:
+                    checkLogLine("cannotStartRecording")
+                case .expiredSession:
+                    checkLogLine("expiredSession")
+                case .incompatibleCategory:
+                    checkLogLine("incompatibleCategory")
+                case .insufficientPriority:
+                    checkLogLine("insufficientPriority")
+                case .isBusy:
+                    checkLogLine("isBusy")
+                case .mediaServicesFailed:
+                    checkLogLine("mediaServicesFailed")
+                case .missingEntitlement:
+                    checkLogLine("missingEntitlement")
+                case .none:
+                    checkLogLine("none")
+                case .resourceNotAvailable:
+                    checkLogLine("resourceNotAvailable")
+                case .sessionNotActive:
+                    checkLogLine("sessionNotActive")
+                case .siriIsRecording:
+                    checkLogLine("siriIsRecording")
+                case .unspecified:
+                    checkLogLine("unspecified")
+                @unknown default:
+                    fatalError()
+                }
+            }
+        }
+    }
 }
+
+
