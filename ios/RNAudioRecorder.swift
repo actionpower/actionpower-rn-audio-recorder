@@ -47,6 +47,7 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
     
     
     @objc func handleAudioSessionInterruption(notification: Notification) {
+        
         guard let userInfo = notification.userInfo,
               let interruptionTypeRawValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
               let interruptionType = AVAudioSession.InterruptionType(rawValue: interruptionTypeRawValue) else {
@@ -55,26 +56,23 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
 
         switch interruptionType {
         case .began:
-            // 간섭이 시작될 때 호출됩니다.
             _isInterrupted = true
             if (!_isPausedByUser) {
-//                recordTimer?.invalidate()
-//                recordTimer = nil;
+                recordTimer?.invalidate()
+                recordTimer = nil;
                 _isPausedByInterrupt = true
-                
                 audioRecorder.pause()
                 sendEvent(withName: "rn-recordback", body: ["status": "pausedByNative"])
             }
         case .ended:
-            // 간섭이 끝날 때 호출됩니다.
             _isInterrupted = false
             if (_isPausedByInterrupt) {
                 do {
                     try AVAudioSession.sharedInstance().setActive(true)
                     audioRecorder.record()
-//                    if (recordTimer == nil) {
-//                        startRecorderTimer()
-//                    }
+                    if (recordTimer == nil) {
+                        startRecorderTimer()
+                    }
                     _isPausedByInterrupt = false
                     sendEvent(withName: "rn-recordback", body: ["status": "resumeByNative"])
                 } catch {
@@ -320,8 +318,10 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
                 "currentMetering": currentMetering,
             ] as [String : Any];
             
-            let inInputError = isOtherAudioPlaying == false && currentMetering == -120
-            let inSessionError = isOtherAudioPlaying == false && currentMetering == -160
+            let isOtherAudioPlaying = audioSession.isOtherAudioPlaying
+            
+            let inInputError = isOtherAudioPlaying == false && currentMetering == -120 && _isInterrupted == false
+            let inSessionError = isOtherAudioPlaying == false && currentMetering == -160 && _isInterrupted == false
             
             if inInputError || inSessionError {
                 sendEvent(withName: "rn-recordback", body: ["status": "resumeByNative"])
