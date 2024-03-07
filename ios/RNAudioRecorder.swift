@@ -295,6 +295,10 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
         if (_isPausedByInterrupt || _isInterrupted) {
             return reject("RNAudioPlayerRecorder", "Recorder is nil", nil)
         }
+
+        if (audioSession.isOtherAudioPlaying && !audioRecorder.isRecording) {
+            return reject("RNAudioPlayerRecorder", "Don't resume", nil)
+        }
         
 
         audioRecorder.record()
