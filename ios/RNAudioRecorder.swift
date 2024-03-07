@@ -384,35 +384,35 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
             if let errorCode = AVAudioSession.ErrorCode(rawValue: error.code) {
                 switch errorCode {
                 case .badParam:
-                    checkLogLine("badParam")
+                    print("badParam")
                 case .cannotInterruptOthers:
-                    checkLogLine("cannotInterruptOthers")
+                    print("cannotInterruptOthers")
                 case .cannotStartPlaying:
-                    checkLogLine("cannotStartPlaying")
+                    print("cannotStartPlaying")
                 case .cannotStartRecording:
-                    checkLogLine("cannotStartRecording")
+                    print("cannotStartRecording")
                 case .expiredSession:
-                    checkLogLine("expiredSession")
+                    print("expiredSession")
                 case .incompatibleCategory:
-                    checkLogLine("incompatibleCategory")
+                    print("incompatibleCategory")
                 case .insufficientPriority:
-                    checkLogLine("insufficientPriority")
+                    print("insufficientPriority")
                 case .isBusy:
-                    checkLogLine("isBusy")
+                    print("isBusy")
                 case .mediaServicesFailed:
-                    checkLogLine("mediaServicesFailed")
+                    print("mediaServicesFailed")
                 case .missingEntitlement:
-                    checkLogLine("missingEntitlement")
+                    print("missingEntitlement")
                 case .none:
-                    checkLogLine("none")
+                    print("none")
                 case .resourceNotAvailable:
-                    checkLogLine("resourceNotAvailable")
+                    print("resourceNotAvailable")
                 case .sessionNotActive:
-                    checkLogLine("sessionNotActive")
+                    print("sessionNotActive")
                 case .siriIsRecording:
-                    checkLogLine("siriIsRecording")
+                    print("siriIsRecording")
                 case .unspecified:
-                    checkLogLine("unspecified")
+                    print("unspecified")
                 @unknown default:
                     fatalError()
                 }
