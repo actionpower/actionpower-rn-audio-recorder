@@ -3,20 +3,19 @@ import AVFoundation
 
 @objc(RNAudioRecorder)
 class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
-    var subscriptionDuration: Double = 0.5
     var audioFileURL: URL?
+    var subscriptionDuration: Double = 0.5
 
-    // Recorder
     var audioSession: AVAudioSession!
     var recordTimer: Timer?
-    var audioRecorder = AVAudioRecorder()
+    var audioRecorder: AVAudioRecorder!
     var _meteringEnabled: Bool = false
     var _isPausedByUser: Bool = false
     var _isInterrupted: Bool = false
     var _isPausedByInterrupt: Bool = false
 
     override static func requiresMainQueueSetup() -> Bool {
-      return true
+        return true
     }
 
     override func supportedEvents() -> [String]! {
@@ -92,7 +91,7 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
     
     @objc(startRecorder:audioSets:meteringEnabled:resolve:reject:)
     func startRecorder(path: String,  audioSets: [String: Any], meteringEnabled: Bool, resolve: @escaping RCTPromiseResolveBlock,
-       rejecter reject: @escaping RCTPromiseRejectBlock) -> Void {
+                       rejecter reject: @escaping RCTPromiseRejectBlock) -> Void {
 
         _meteringEnabled = meteringEnabled;
 
@@ -254,6 +253,14 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
 
         audioRecorder.stop()
 
+        do {
+            try audioSession.setCategory(.playback)
+        } catch {
+            print("DEBUG : \(error.localizedDescription)")
+        }
+        
+        _isPausedByUser = false
+
         if (recordTimer != nil) {
             recordTimer!.invalidate()
             recordTimer = nil
@@ -331,14 +338,14 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
             let isOtherAudioPlaying = audioSession.isOtherAudioPlaying
             let isEndInterrupted = isOtherAudioPlaying == false && _isInterrupted == false
             let isError = (currentMetering == -120 || currentMetering == -160) && isEndInterrupted
-            let pausedRecording = audioRecorder.isRecording
+            let isRecording = audioRecorder.isRecording
             
-//            if isError && !pausedRecording {
+//            if isError {
 //                reactivateRecord()
 //                sendEvent(withName: "rn-recordback", body: ["status": "tryReactiveByNative"])
 //            }
             
-            if audioRecorder.isRecording {
+            if isRecording {
                 sendEvent(withName: "rn-recordback", body: status)
             }
         }
@@ -376,9 +383,7 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
     }
     
     func pausedByNative() {
-        if audioRecorder.isRecording {
-            audioRecorder.pause()
-        }
+        audioRecorder.pause()
     }
     
     func controlSessionActivation(_ active: Bool) {
@@ -424,5 +429,3 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
         }
     }
 }
-
-
