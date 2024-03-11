@@ -287,6 +287,7 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
         _isPausedByUser = true
 
         audioRecorder.pause()
+        controlSessionActivation(false)
         resolve("Recorder paused!")
     }
 
