@@ -84,6 +84,8 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
                     print("Failed to activate audio session or resume recording.")
                 }
             }
+        @unknown default:
+            print("DEBUG: @unknown default 인터럽트")
         }
     }
     
@@ -299,13 +301,18 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
             return reject("RNAudioPlayerRecorder", "Recorder is nil", nil)
         }
         
-        //TODO: - 다른 오디오 종료하라는 toast 메시지 이면 좋겠음.
         if (audioSession.isOtherAudioPlaying && !audioRecorder.isRecording) {
             return reject("RNAudioPlayerRecorder", "Don't resume", nil)
         }
-        
-        audioRecorder.record()
-        
+
+        if audioRecorder.isRecording {
+            audioRecorder.pause()
+            sleep(1)
+            audioRecorder.record()
+        } else {
+            audioRecorder.record()
+        }
+    
         if (recordTimer == nil) {
             startRecorderTimer()
         }
@@ -330,21 +337,13 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
                 "currentPosition": audioRecorder.currentTime * 1000,
                 "currentMetering": currentMetering,
             ] as [String : Any];
+        
+            let isCurrentTimeError = audioRecorder.currentTime < 0 || audioRecorder.currentTime > 400000001
             
-            let isOtherAudioPlaying = audioSession.isOtherAudioPlaying
-            let isEndInterrupted = isOtherAudioPlaying == false && _isInterrupted == false
-            let isError = (currentMetering == -120 || currentMetering == -160) && isEndInterrupted
-            let isRecording = audioRecorder.isRecording
-            
-            let isCurrnetTimeError = audioRecorder.currentTime < 0
-            
-            if isCurrnetTimeError {
-                print("DEBUG: 오디오 플레이 타임 에러")
-                do {
-                    try audioSession.setCategory(.playAndRecord, mode: .default, options: [.duckOthers, .allowBluetooth, .allowBluetoothA2DP, .interruptSpokenAudioAndMixWithOthers])
-                    
-                } catch {
-                    print(error.localizedDescription)
+            if isCurrentTimeError {
+                if audioRecorder.isRecording {
+                    audioRecorder.pause()
+                    sendEvent(withName: "rn-recordback", body: "failResumeByNative")
                 }
             }
             
