@@ -3,9 +3,10 @@ import AVFoundation
 
 @objc(RNAudioRecorder)
 class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
-    var audioFileURL: URL?
     var subscriptionDuration: Double = 0.5
-
+    var audioFileURL: URL?
+    
+    // Recorder
     var audioSession: AVAudioSession!
     var recordTimer: Timer?
     var audioRecorder: AVAudioRecorder!
@@ -13,11 +14,11 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
     var _isPausedByUser: Bool = false
     var _isInterrupted: Bool = false
     var _isPausedByInterrupt: Bool = false
-
+    
     override static func requiresMainQueueSetup() -> Bool {
         return true
     }
-
+    
     override func supportedEvents() -> [String]! {
         return ["rn-recordback"]
     }
@@ -31,7 +32,7 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
     func setSubscriptionDuration(duration: Double) -> Void {
         subscriptionDuration = duration
     }
-
+    
     func setAudioFileURL(path: String) {
         if (path == "DEFAULT") {
             let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
@@ -44,7 +45,6 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
         }
     }
     
-    
     @objc func handleAudioSessionInterruption(notification: Notification) {
         
         guard let userInfo = notification.userInfo,
@@ -52,7 +52,7 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
               let interruptionType = AVAudioSession.InterruptionType(rawValue: interruptionTypeRawValue) else {
             return
         }
-
+        
         switch interruptionType {
         case .began:
             _isInterrupted = true
@@ -85,35 +85,35 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
                 }
             }
         @unknown default:
-            break
+            print("DEBUG: @unknown default 인터럽트")
         }
     }
     
     @objc(startRecorder:audioSets:meteringEnabled:resolve:reject:)
-    func startRecorder(path: String,  audioSets: [String: Any], meteringEnabled: Bool, resolve: @escaping RCTPromiseResolveBlock,
+    func startRecorder(path: String, audioSets: [String: Any], meteringEnabled: Bool, resolve: @escaping RCTPromiseResolveBlock,
                        rejecter reject: @escaping RCTPromiseRejectBlock) -> Void {
-
+        
         _meteringEnabled = meteringEnabled;
-
+        
         let encoding = audioSets["AVFormatIDKeyIOS"] as? String
         let mode = audioSets["AVModeIOS"] as? String
         let avLPCMBitDepth = audioSets["AVLinearPCMBitDepthKeyIOS"] as? Int
         let avLPCMIsBigEndian = audioSets["AVLinearPCMIsBigEndianKeyIOS"] as? Bool
         let avLPCMIsFloatKey = audioSets["AVLinearPCMIsFloatKeyIOS"] as? Bool
         let avLPCMIsNonInterleaved = audioSets["AVLinearPCMIsNonInterleavedIOS"] as? Bool
-
+        
         var avFormat: Int? = nil
         var avMode: AVAudioSession.Mode = AVAudioSession.Mode.default
         var sampleRate = audioSets["AVSampleRateKeyIOS"] as? Int
         var numberOfChannel = audioSets["AVNumberOfChannelsKeyIOS"] as? Int
         var audioQuality = audioSets["AVEncoderAudioQualityKeyIOS"] as? Int
-
+        
         setAudioFileURL(path: path)
-
+        
         if (sampleRate == nil) {
             sampleRate = 44100;
         }
-
+        
         if (encoding == nil) {
             avFormat = Int(kAudioFormatAppleLossless)
         } else {
@@ -149,7 +149,7 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
                 avFormat = Int(kAudioFormatOpus)
             }
         }
-
+        
         if (mode == "measurement") {
             avMode = AVAudioSession.Mode.measurement
         } else if (mode == "gamechat") {
@@ -171,16 +171,16 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
                 // Fallback on earlier versions
             }
         }
-
-
+        
+        
         if (numberOfChannel == nil) {
             numberOfChannel = 2
         }
-
+        
         if (audioQuality == nil) {
             audioQuality = AVAudioQuality.medium.rawValue
         }
-
+        
         func startRecording() {
             let settings = [
                 AVSampleRateKey: sampleRate!,
@@ -192,41 +192,40 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
                 AVLinearPCMIsFloatKey: avLPCMIsFloatKey ?? false,
                 AVLinearPCMIsNonInterleaved: avLPCMIsNonInterleaved ?? false
             ] as [String : Any]
-
+            
             do {
                 audioRecorder = try AVAudioRecorder(url: audioFileURL!, settings: settings)
-
+                
                 if (audioRecorder != nil) {
                     audioRecorder.prepareToRecord()
                     audioRecorder.delegate = self
                     audioRecorder.isMeteringEnabled = _meteringEnabled
                     let isRecordStarted = audioRecorder.record()
-
+                    
                     if !isRecordStarted {
                         reject("RNAudioPlayerRecorder", "Error occured during initiating recorder", nil)
                         return
                     }
-
+                    
                     startRecorderTimer()
-
+                    
                     resolve(audioFileURL?.absoluteString)
                     return
                 }
-
+                
                 reject("RNAudioPlayerRecorder", "Error occured during initiating recorder", nil)
             } catch {
                 reject("RNAudioPlayerRecorder", "Error occured during recording", nil)
             }
         }
         
-
         NotificationCenter.default.addObserver(self, selector: #selector(handleAudioSessionInterruption(notification:)), name: AVAudioSession.interruptionNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(controlRouteChange), name: AVAudioSession.routeChangeNotification, object: nil)
         audioSession = AVAudioSession.sharedInstance()
-
+        
         do {
             try audioSession.setCategory(.playAndRecord, mode: avMode, options: [.duckOthers, .allowBluetooth, .allowBluetoothA2DP, .interruptSpokenAudioAndMixWithOthers])
-            try audioSession.setActive(true)
-
+            try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
             audioSession.requestRecordPermission { granted in
                 DispatchQueue.main.async {
                     if granted {
@@ -250,9 +249,9 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
             reject("RNAudioPlayerRecorder", "Failed to stop recorder. It is already nil.", nil)
             return
         }
-
+        
         audioRecorder.stop()
-
+        
         do {
             try audioSession.setCategory(.playback)
         } catch {
@@ -260,15 +259,13 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
         }
         
         _isPausedByUser = false
-
+        
         if (recordTimer != nil) {
             recordTimer!.invalidate()
             recordTimer = nil
         }
         
         NotificationCenter.default.removeObserver(self, name: AVAudioSession.interruptionNotification, object: nil)
-
-
         resolve(audioFileURL?.absoluteString)
     }
     
@@ -280,17 +277,17 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
         if (audioRecorder == nil) {
             return reject("RNAudioPlayerRecorder", "Recorder is not recording", nil)
         }
-
+        
         recordTimer?.invalidate()
         recordTimer = nil;
         
         _isPausedByUser = true
-
+        
         audioRecorder.pause()
         controlSessionActivation(false)
         resolve("Recorder paused!")
     }
-
+    
     @objc(resumeRecorder:rejecter:)
     public func resumeRecorder(
         resolve: @escaping RCTPromiseResolveBlock,
@@ -303,20 +300,25 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
         if (_isPausedByInterrupt || _isInterrupted) {
             return reject("RNAudioPlayerRecorder", "Recorder is nil", nil)
         }
-
+        
         if (audioSession.isOtherAudioPlaying && !audioRecorder.isRecording) {
             return reject("RNAudioPlayerRecorder", "Don't resume", nil)
         }
-        
 
-        audioRecorder.record()
-
+        if audioRecorder.isRecording {
+            audioRecorder.pause()
+            sleep(1)
+            audioRecorder.record()
+        } else {
+            audioRecorder.record()
+        }
+    
         if (recordTimer == nil) {
             startRecorderTimer()
         }
         
         _isPausedByUser = false
-
+        
         resolve("Recorder paused!")
     }
     
@@ -324,34 +326,33 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
     public func updateRecorderProgress(timer: Timer) -> Void {
         if (audioRecorder != nil) {
             var currentMetering: Float = 0
-
+            
             if (_meteringEnabled) {
                 audioRecorder.updateMeters()
                 currentMetering = audioRecorder.averagePower(forChannel: 0)
             }
-        
+            
             let status = [
                 "isRecording": audioRecorder.isRecording,
                 "currentPosition": audioRecorder.currentTime * 1000,
                 "currentMetering": currentMetering,
             ] as [String : Any];
+        
+            let isCurrentTimeError = audioRecorder.currentTime < 0 || audioRecorder.currentTime > 400000001
             
-            let isOtherAudioPlaying = audioSession.isOtherAudioPlaying
-            let isEndInterrupted = isOtherAudioPlaying == false && _isInterrupted == false
-            let isError = (currentMetering == -120 || currentMetering == -160) && isEndInterrupted
-            let isRecording = audioRecorder.isRecording
+            if isCurrentTimeError {
+                if audioRecorder.isRecording {
+                    audioRecorder.pause()
+                    sendEvent(withName: "rn-recordback", body: "failResumeByNative")
+                }
+            }
             
-//            if isError {
-//                reactivateRecord()
-//                sendEvent(withName: "rn-recordback", body: ["status": "tryReactiveByNative"])
-//            }
-            
-            if isRecording {
+            if audioRecorder.isRecording {
                 sendEvent(withName: "rn-recordback", body: status)
             }
         }
     }
-
+    
     @objc(startRecorderTimer)
     func startRecorderTimer() -> Void {
         DispatchQueue.main.async {
@@ -364,7 +365,7 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
             )
         }
     }
-
+    
     func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
         if !flag {
             print("Failed to stop recorder")
@@ -376,7 +377,6 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
         resumeByNative()
     }
     
-    
     func resumeByNative() {
         if !audioRecorder.isRecording {
             audioRecorder.record()
@@ -384,12 +384,14 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
     }
     
     func pausedByNative() {
-        audioRecorder.pause()
+        if audioRecorder.isRecording {
+            audioRecorder.pause()
+        }
     }
     
     func controlSessionActivation(_ active: Bool) {
         do {
-            try audioSession.setActive(active, options: .notifyOthersOnDeactivation)
+            try audioSession.setActive(active)
         } catch let error as NSError {
             if let errorCode = AVAudioSession.ErrorCode(rawValue: error.code) {
                 switch errorCode {
@@ -427,6 +429,34 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
                     fatalError()
                 }
             }
+        }
+    }
+    
+    @objc func controlRouteChange(notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let reasonValue = userInfo[AVAudioSessionRouteChangeReasonKey] as? UInt,
+              let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else {
+            return
+        }
+        switch reason {
+        case .newDeviceAvailable:
+            print("DEBUG:새로운 출력 장치가 사용 가능해짐 - 예: 헤드폰 연결")
+        case .oldDeviceUnavailable:
+            print("DEBUG:기존 출력 장치가 사용 불가능해짐 - 예: 헤드폰 연결 해제")
+        case .categoryChange:
+            print("DEBUG:오디오 세션 카테고리 변경")
+        case .override:
+            print("DEBUG:오디오 출력 경로가 오버라이드됨")
+        case .wakeFromSleep:
+            print("DEBUG:기기가 슬립 모드에서 깨어남")
+        case .noSuitableRouteForCategory:
+            print("DEBUG:현재 카테고리에 적합한 라우트가 없음")
+        case .routeConfigurationChange:
+            print("DEBUG:라우트 구성 변경")
+        case .unknown:
+            print("DEBUG:unknown")
+        @unknown default:
+            print("DEBUG:알 수 없는 라우트 변경 사유")
         }
     }
 }
