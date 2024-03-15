@@ -342,8 +342,8 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
             
             if isCurrentTimeError {
                 if audioRecorder.isRecording {
-                    audioRecorder.pause()
                     sendEvent(withName: "rn-recordback", body: "failResumeByNative")
+                    audioRecorder.pause()
                 }
             }
             
