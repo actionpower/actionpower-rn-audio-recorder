@@ -16,7 +16,7 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
     var _isPausedByUser: Bool = false
     var _isInterrupted: Bool = false
     var _isPausedByInterrupt: Bool = false
-    var _isFailResumeByNative: Bool = false 
+    var _isFailResumeByNative: Bool = false
 
     var callObserver: CXCallObserver?
     
@@ -36,6 +36,28 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
     @objc(setSubscriptionDuration:)
     func setSubscriptionDuration(duration: Double) -> Void {
         subscriptionDuration = duration
+    }
+    
+    // RN에서 RNAudioRecorder가 Singleton으로 동작되기 때문에 녹음이 끝났을 때 전역변수들을 직접 초기화시켜주기 위한 함수
+    func initialize() {
+        if (recordTimer != nil) {
+            recordTimer!.invalidate()
+            recordTimer = nil
+        }
+        
+        do {
+            try audioSession.setCategory(.playback)
+        } catch {
+            print("DEBUG : \(error.localizedDescription)")
+        }
+        
+        _isPausedByUser = false
+        _isInterrupted = false
+        _isPausedByInterrupt = false
+        _isFailResumeByNative = false
+        
+        callObserver = nil
+        NotificationCenter.default.removeObserver(self, name: AVAudioSession.interruptionNotification, object: nil)
     }
     
     func setAudioFileURL(path: String) {
@@ -82,8 +104,8 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
                             audioRecorder.record()
                             sendEvent(withName: "rn-recordback", body: ["status": "resumeByNative"])
                         } else {
-                            // voip 전화인 경우 interrupt가 시작되자마자 전화가 끊기지도 않았는데 interrupt가 end되는 버그 발생 
-                            // voip 전화로 인해 interrupt가 지속되고 있음을 변수를 통해 관리 
+                            // voip 전화인 경우 interrupt가 시작되자마자 전화가 끊기지도 않았는데 interrupt가 end되는 버그 발생
+                            // voip 전화로 인해 interrupt가 지속되고 있음을 변수를 통해 관리
                             // call observer의 hasEnded 이벤트에서 처리됨
                             _isFailResumeByNative = true
                         }
@@ -227,7 +249,7 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
             }
         }
         
-        self.callObserver = CSCAllObserver()
+        self.callObserver = CXCallObserver()
         self.callObserver?.setDelegate(self, queue: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(handleAudioSessionInterruption(notification:)), name: AVAudioSession.interruptionNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(controlRouteChange), name: AVAudioSession.routeChangeNotification, object: nil)
@@ -250,33 +272,48 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
         }
     }
     
-    @objc(stopRecorder:rejecter:)
-    public func stopRecorder(
-        resolve: @escaping RCTPromiseResolveBlock,
-        rejecter reject: @escaping RCTPromiseRejectBlock
-    ) -> Void {
-        if (audioRecorder == nil) {
-            reject("RNAudioPlayerRecorder", "Failed to stop recorder. It is already nil.", nil)
-            return
+    @objc(updateRecorderProgress:)
+    public func updateRecorderProgress(timer: Timer) -> Void {
+        if (audioRecorder != nil) {
+            var currentMetering: Float = 0
+            
+            if (_meteringEnabled) {
+                audioRecorder.updateMeters()
+                currentMetering = audioRecorder.averagePower(forChannel: 0)
+            }
+            
+            let status = [
+                "isRecording": audioRecorder.isRecording,
+                "currentPosition": audioRecorder.currentTime * 1000,
+                "currentMetering": currentMetering,
+            ] as [String : Any];
+        
+            let isCurrentTimeError = audioRecorder.currentTime < 0 || audioRecorder.currentTime > 400000001
+            
+            if isCurrentTimeError {
+                if audioRecorder.isRecording {
+                    audioRecorder.pause()
+                    sendEvent(withName: "rn-recordback", body: "failResumeByNative")
+                }
+            }
+            
+            if audioRecorder.isRecording {
+                sendEvent(withName: "rn-recordback", body: status)
+            }
         }
-        
-        audioRecorder.stop()
-        
-        do {
-            try audioSession.setCategory(.playback)
-        } catch {
-            print("DEBUG : \(error.localizedDescription)")
+    }
+    
+    @objc(startRecorderTimer)
+    func startRecorderTimer() -> Void {
+        DispatchQueue.main.async {
+            self.recordTimer = Timer.scheduledTimer(
+                timeInterval: self.subscriptionDuration,
+                target: self,
+                selector: #selector(self.updateRecorderProgress),
+                userInfo: nil,
+                repeats: true
+            )
         }
-        
-        _isPausedByUser = false
-        
-        if (recordTimer != nil) {
-            recordTimer!.invalidate()
-            recordTimer = nil
-        }
-        
-        NotificationCenter.default.removeObserver(self, name: AVAudioSession.interruptionNotification, object: nil)
-        resolve(audioFileURL?.absoluteString)
     }
     
     @objc(pauseRecorder:rejecter:)
@@ -332,48 +369,20 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
         resolve("Recorder paused!")
     }
     
-    @objc(updateRecorderProgress:)
-    public func updateRecorderProgress(timer: Timer) -> Void {
-        if (audioRecorder != nil) {
-            var currentMetering: Float = 0
-            
-            if (_meteringEnabled) {
-                audioRecorder.updateMeters()
-                currentMetering = audioRecorder.averagePower(forChannel: 0)
-            }
-            
-            let status = [
-                "isRecording": audioRecorder.isRecording,
-                "currentPosition": audioRecorder.currentTime * 1000,
-                "currentMetering": currentMetering,
-            ] as [String : Any];
+    @objc(stopRecorder:rejecter:)
+    public func stopRecorder(
+        resolve: @escaping RCTPromiseResolveBlock,
+        rejecter reject: @escaping RCTPromiseRejectBlock
+    ) -> Void {
+        if (audioRecorder == nil) {
+            reject("RNAudioPlayerRecorder", "Failed to stop recorder. It is already nil.", nil)
+            return
+        }
         
-            let isCurrentTimeError = audioRecorder.currentTime < 0 || audioRecorder.currentTime > 400000001
-            
-            if isCurrentTimeError {
-                if audioRecorder.isRecording {
-                    audioRecorder.pause()
-                    sendEvent(withName: "rn-recordback", body: "failResumeByNative")
-                }
-            }
-            
-            if audioRecorder.isRecording {
-                sendEvent(withName: "rn-recordback", body: status)
-            }
-        }
-    }
-    
-    @objc(startRecorderTimer)
-    func startRecorderTimer() -> Void {
-        DispatchQueue.main.async {
-            self.recordTimer = Timer.scheduledTimer(
-                timeInterval: self.subscriptionDuration,
-                target: self,
-                selector: #selector(self.updateRecorderProgress),
-                userInfo: nil,
-                repeats: true
-            )
-        }
+        audioRecorder.stop()
+        initialize()
+        
+        resolve(audioFileURL?.absoluteString)
     }
     
     func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
