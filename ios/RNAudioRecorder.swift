@@ -7,18 +7,17 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
     var subscriptionDuration: Double = 0.5
     var audioFileURL: URL?
     
-    // Recorder
+    var callObserver: CXCallObserver?
+    
     var audioSession: AVAudioSession!
-    var recordTimer: Timer?
     var audioRecorder: AVAudioRecorder!
+    var recordTimer: Timer?
     var _meteringEnabled: Bool = false
-
+    
     var _isPausedByUser: Bool = false
     var _isInterrupted: Bool = false
     var _isPausedByInterrupt: Bool = false
     var _isFailResumeByNative: Bool = false
-
-    var callObserver: CXCallObserver?
     
     override static func requiresMainQueueSetup() -> Bool {
         return true
@@ -145,64 +144,8 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
             sampleRate = 44100;
         }
         
-        if (encoding == nil) {
-            avFormat = Int(kAudioFormatAppleLossless)
-        } else {
-            if (encoding == "lpcm") {
-                avFormat = Int(kAudioFormatAppleIMA4)
-            } else if (encoding == "ima4") {
-                avFormat = Int(kAudioFormatAppleIMA4)
-            } else if (encoding == "aac") {
-                avFormat = Int(kAudioFormatMPEG4AAC)
-            } else if (encoding == "MAC3") {
-                avFormat = Int(kAudioFormatMACE3)
-            } else if (encoding == "MAC6") {
-                avFormat = Int(kAudioFormatMACE6)
-            } else if (encoding == "ulaw") {
-                avFormat = Int(kAudioFormatULaw)
-            } else if (encoding == "alaw") {
-                avFormat = Int(kAudioFormatALaw)
-            } else if (encoding == "mp1") {
-                avFormat = Int(kAudioFormatMPEGLayer1)
-            } else if (encoding == "mp2") {
-                avFormat = Int(kAudioFormatMPEGLayer2)
-            } else if (encoding == "mp4") {
-                avFormat = Int(kAudioFormatMPEG4AAC)
-            } else if (encoding == "alac") {
-                avFormat = Int(kAudioFormatAppleLossless)
-            } else if (encoding == "amr") {
-                avFormat = Int(kAudioFormatAMR)
-            } else if (encoding == "flac") {
-                if #available(iOS 11.0, *) {
-                    avFormat = Int(kAudioFormatFLAC)
-                }
-            } else if (encoding == "opus") {
-                avFormat = Int(kAudioFormatOpus)
-            }
-        }
-        
-        if (mode == "measurement") {
-            avMode = AVAudioSession.Mode.measurement
-        } else if (mode == "gamechat") {
-            avMode = AVAudioSession.Mode.gameChat
-        } else if (mode == "movieplayback") {
-            avMode = AVAudioSession.Mode.moviePlayback
-        } else if (mode == "spokenaudio") {
-            avMode = AVAudioSession.Mode.spokenAudio
-        } else if (mode == "videochat") {
-            avMode = AVAudioSession.Mode.videoChat
-        } else if (mode == "videorecording") {
-            avMode = AVAudioSession.Mode.videoRecording
-        } else if (mode == "voicechat") {
-            avMode = AVAudioSession.Mode.voiceChat
-        } else if (mode == "voiceprompt") {
-            if #available(iOS 12.0, *) {
-                avMode = AVAudioSession.Mode.voicePrompt
-            } else {
-                // Fallback on earlier versions
-            }
-        }
-        
+        avFormat = Helper.audioFormat(forEncoding: encoding)
+        avMode = Helper.audioSessionMode(forMode: mode)
         
         if (numberOfChannel == nil) {
             numberOfChannel = 2
@@ -288,7 +231,7 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
                 "currentPosition": audioRecorder.currentTime * 1000,
                 "currentMetering": currentMetering,
             ] as [String : Any];
-        
+            
             let isCurrentTimeError = audioRecorder.currentTime < 0 || audioRecorder.currentTime > 400000001
             
             if isCurrentTimeError {
@@ -352,7 +295,7 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
         if (_isFailResumeByNative) {
             return reject("RNAudioPlayerRecorder", "voip", nil)
         }
-
+        
         if audioRecorder.isRecording {
             audioRecorder.pause()
             sleep(1)
@@ -360,7 +303,7 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
         } else {
             audioRecorder.record()
         }
-    
+        
         if (recordTimer == nil) {
             startRecorderTimer()
         }
@@ -386,66 +329,14 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
         resolve(audioFileURL?.absoluteString)
     }
     
-    func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
-        if !flag {
-            print("Failed to stop recorder")
-        }
-    }
-    
-    func reactivateRecord() {
-        pausedByNative()
-        resumeByNative()
-    }
-    
-    func resumeByNative() {
-        if !audioRecorder.isRecording {
-            audioRecorder.record()
-        }
-    }
-    
-    func pausedByNative() {
-        if audioRecorder.isRecording {
-            audioRecorder.pause()
-        }
-    }
-    
     func controlSessionActivation(_ active: Bool) {
         do {
             try audioSession.setActive(active)
         } catch let error as NSError {
             if let errorCode = AVAudioSession.ErrorCode(rawValue: error.code) {
-                switch errorCode {
-                case .badParam:
-                    print("badParam")
-                case .cannotInterruptOthers:
-                    print("cannotInterruptOthers")
-                case .cannotStartPlaying:
-                    print("cannotStartPlaying")
-                case .cannotStartRecording:
-                    print("cannotStartRecording")
-                case .expiredSession:
-                    print("expiredSession")
-                case .incompatibleCategory:
-                    print("incompatibleCategory")
-                case .insufficientPriority:
-                    print("insufficientPriority")
-                case .isBusy:
-                    print("isBusy")
-                case .mediaServicesFailed:
-                    print("mediaServicesFailed")
-                case .missingEntitlement:
-                    print("missingEntitlement")
-                case .none:
-                    print("none")
-                case .resourceNotAvailable:
-                    print("resourceNotAvailable")
-                case .sessionNotActive:
-                    print("sessionNotActive")
-                case .siriIsRecording:
-                    print("siriIsRecording")
-                case .unspecified:
-                    print("unspecified")
-                @unknown default:
+                if let description = Helper.audioSessionErrorDescriptions[errorCode] {
+                    print("DEBUG: AVAudioSession ErrorCode - \(description)")
+                } else {
                     fatalError()
                 }
             }
@@ -458,25 +349,11 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
               let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else {
             return
         }
-        switch reason {
-        case .newDeviceAvailable:
-            print("DEBUG:새로운 출력 장치가 사용 가능해짐 - 예: 헤드폰 연결")
-        case .oldDeviceUnavailable:
-            print("DEBUG:기존 출력 장치가 사용 불가능해짐 - 예: 헤드폰 연결 해제")
-        case .categoryChange:
-            print("DEBUG:오디오 세션 카테고리 변경")
-        case .override:
-            print("DEBUG:오디오 출력 경로가 오버라이드됨")
-        case .wakeFromSleep:
-            print("DEBUG:기기가 슬립 모드에서 깨어남")
-        case .noSuitableRouteForCategory:
-            print("DEBUG:현재 카테고리에 적합한 라우트가 없음")
-        case .routeConfigurationChange:
-            print("DEBUG:라우트 구성 변경")
-        case .unknown:
-            print("DEBUG:unknown")
-        @unknown default:
-            print("DEBUG:알 수 없는 라우트 변경 사유")
+        
+        if let description = Helper.reasonDescriptions[reason] {
+            print("DEBUG: route change reason: \(description)")
+        } else {
+            print("DEBUG: route change reason: 알 수 없는 라우트 변경")
         }
     }
 }
