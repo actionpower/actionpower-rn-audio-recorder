@@ -58,6 +58,7 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
         
         callObserver = nil
         NotificationCenter.default.removeObserver(self, name: AVAudioSession.interruptionNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: AVAudioSession.routeChangeNotification, object: nil)
     }
     
     func setAudioFileURL(path: String) {
