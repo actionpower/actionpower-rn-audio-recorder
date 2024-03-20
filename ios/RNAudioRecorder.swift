@@ -44,6 +44,8 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
             recordTimer = nil
         }
         
+        // 녹음 후 보드에서 녹음된 음성 파일 재생 시 사운드 출력이 작아지는 문제 Fix
+        // Category를 .playAndRecord으로 남아 있으면, 사운드 출력이 돌아오지 않음
         do {
             try audioSession.setCategory(.playback)
         } catch {
@@ -232,8 +234,10 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
                 "currentMetering": currentMetering,
             ] as [String : Any];
             
-            let isCurrentTimeError = audioRecorder.currentTime < 0 || audioRecorder.currentTime > 400000001
-            
+            let isCurrentTimeError = audioRecorder.currentTime < 0
+                        
+            // 녹음 재개 버튼 클릭과 동시에 siri 실행 시 currentTime이 음수로 나타나는 현상 Fix
+            // 일시 정지 후 다시 재개하면 정상적으로 녹음 가능
             if isCurrentTimeError {
                 if audioRecorder.isRecording {
                     audioRecorder.pause()
@@ -276,7 +280,7 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
         
         audioRecorder.pause()
         // 일시 정지 상태에서 Interrupt 이벤트 받지 않도록 Fix
-        /// 일시 정지 상태에서 Interrupt 수신할 경우, pause 중복으로 파일 유실될 수 있음
+        // 일시 정지 상태에서 Interrupt 수신할 경우, pause 중복으로 파일 유실될 수 있음
         controlSessionActivation(false)
         resolve("Recorder paused!")
     }
@@ -298,6 +302,8 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
             return reject("RNAudioPlayerRecorder", "voip", nil)
         }
         
+        // 녹음 덮어쓰기가 발생하지 않도록 Fix
+        // record  중복으로 파일이 유실될 수 있음
         if audioRecorder.isRecording {
             audioRecorder.pause()
             sleep(1)
