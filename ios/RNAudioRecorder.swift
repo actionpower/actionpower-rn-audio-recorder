@@ -275,6 +275,8 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
         _isPausedByUser = true
         
         audioRecorder.pause()
+        // 일시 정지 상태에서 Interrupt 이벤트 받지 않도록 Fix
+        /// 일시 정지 상태에서 Interrupt 수신할 경우, pause 중복으로 파일 유실될 수 있음
         controlSessionActivation(false)
         resolve("Recorder paused!")
     }
