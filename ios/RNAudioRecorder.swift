@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import CallKit
 
 @objc(RNAudioRecorder)
 class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
@@ -11,9 +12,13 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
     var recordTimer: Timer?
     var audioRecorder: AVAudioRecorder!
     var _meteringEnabled: Bool = false
+
     var _isPausedByUser: Bool = false
     var _isInterrupted: Bool = false
     var _isPausedByInterrupt: Bool = false
+    var _isFailResumeByNative: Bool = false 
+
+    var callObserver: CXCallObserver?
     
     override static func requiresMainQueueSetup() -> Bool {
         return true
@@ -77,7 +82,10 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
                             audioRecorder.record()
                             sendEvent(withName: "rn-recordback", body: ["status": "resumeByNative"])
                         } else {
-                            sendEvent(withName: "rn-recordback", body: ["status": "failResumeByNative"])
+                            // voip 전화인 경우 interrupt가 시작되자마자 전화가 끊기지도 않았는데 interrupt가 end되는 버그 발생 
+                            // voip 전화로 인해 interrupt가 지속되고 있음을 변수를 통해 관리 
+                            // call observer의 hasEnded 이벤트에서 처리됨
+                            _isFailResumeByNative = true
                         }
                     }
                 } catch {
@@ -219,6 +227,8 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
             }
         }
         
+        self.callObserver = CSCAllObserver()
+        self.callObserver?.setDelegate(self, queue: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(handleAudioSessionInterruption(notification:)), name: AVAudioSession.interruptionNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(controlRouteChange), name: AVAudioSession.routeChangeNotification, object: nil)
         audioSession = AVAudioSession.sharedInstance()
@@ -301,8 +311,8 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
             return reject("RNAudioPlayerRecorder", "Recorder is nil", nil)
         }
         
-        if (audioSession.isOtherAudioPlaying && !audioRecorder.isRecording) {
-            return reject("RNAudioPlayerRecorder", "Don't resume", nil)
+        if (_isFailResumeByNative) {
+            return reject("RNAudioPlayerRecorder", "voip", nil)
         }
 
         if audioRecorder.isRecording {
@@ -457,6 +467,21 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
             print("DEBUG:unknown")
         @unknown default:
             print("DEBUG:알 수 없는 라우트 변경 사유")
+        }
+    }
+}
+
+// MARK: - CallObserver
+// 일반적인 전화는 audio session interrupt handler에서 모두 처리되지만
+// slack hudle과 같은 voip 전화는 interrupt handler에서 정확한처리가 불가
+// 이를 처리하기 위해 추가
+extension RNAudioRecorder: CXCallObserverDelegate {
+    func callObserver(_ callObserver: CXCallObserver, callChanged call: CXCall) {
+        if call.hasEnded {
+            if (_isFailResumeByNative) {
+                sendEvent(withName: "rn-recordback", body: ["status": "failResumeByNative"])
+                _isFailResumeByNative = false
+            }
         }
     }
 }
