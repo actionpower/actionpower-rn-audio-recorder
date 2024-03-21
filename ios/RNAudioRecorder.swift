@@ -18,6 +18,7 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
     var _isInterrupted: Bool = false
     var _isPausedByInterrupt: Bool = false
     var _isFailResumeByNative: Bool = false
+    var _isCalled: Bool = false
     
     override static func requiresMainQueueSetup() -> Bool {
         return true
@@ -56,6 +57,8 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
         _isInterrupted = false
         _isPausedByInterrupt = false
         _isFailResumeByNative = false
+        _isCalled = false
+        
         
         callObserver = nil
         NotificationCenter.default.removeObserver(self, name: AVAudioSession.interruptionNotification, object: nil)
@@ -84,6 +87,7 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
         
         switch interruptionType {
         case .began:
+            print("DEBUG: [interruption began]")
             _isInterrupted = true
             if (!_isPausedByUser) {
                 recordTimer?.invalidate()
@@ -93,27 +97,24 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
                 sendEvent(withName: "rn-recordback", body: ["status": "pausedByNative"])
             }
         case .ended:
+            print("DEBUG: [interruption ended]")
             _isInterrupted = false
             if (_isPausedByInterrupt) {
-                do {
-                    if (recordTimer == nil) {
-                        startRecorderTimer()
+                if (recordTimer == nil) {
+                    startRecorderTimer()
+                }
+                _isPausedByInterrupt = false
+                if let optionsRawValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt {
+                    let options = AVAudioSession.InterruptionOptions(rawValue: optionsRawValue)
+                    if options.contains(.shouldResume) {
+                        audioRecorder.record()
+                        sendEvent(withName: "rn-recordback", body: ["status": "resumeByNative"])
+                    } else {
+                        // voip 전화인 경우 interrupt가 시작되자마자 전화가 끊기지도 않았는데 interrupt가 end되는 버그 발생
+                        // voip 전화로 인해 interrupt가 지속되고 있음을 변수를 통해 관리
+                        // call observer의 hasEnded 이벤트에서 처리됨
+                        _isFailResumeByNative = true
                     }
-                    _isPausedByInterrupt = false
-                    if let optionsRawValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt {
-                        let options = AVAudioSession.InterruptionOptions(rawValue: optionsRawValue)
-                        if options.contains(.shouldResume) {
-                            audioRecorder.record()
-                            sendEvent(withName: "rn-recordback", body: ["status": "resumeByNative"])
-                        } else {
-                            // voip 전화인 경우 interrupt가 시작되자마자 전화가 끊기지도 않았는데 interrupt가 end되는 버그 발생
-                            // voip 전화로 인해 interrupt가 지속되고 있음을 변수를 통해 관리
-                            // call observer의 hasEnded 이벤트에서 처리됨
-                            _isFailResumeByNative = true
-                        }
-                    }
-                } catch {
-                    print("Failed to activate audio session or resume recording.")
                 }
             }
         @unknown default:
@@ -235,7 +236,7 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
             ] as [String : Any];
             
             let isCurrentTimeError = audioRecorder.currentTime < 0
-                        
+            
             // 녹음 재개 버튼 클릭과 동시에 siri 실행 시 currentTime이 음수로 나타나는 현상 Fix
             // 일시 정지 후 다시 재개하면 정상적으로 녹음 가능
             if isCurrentTimeError {
@@ -281,7 +282,9 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
         audioRecorder.pause()
         // 일시 정지 상태에서 Interrupt 이벤트 받지 않도록 Fix
         // 일시 정지 상태에서 Interrupt 수신할 경우, pause 중복으로 파일 유실될 수 있음
+        // 보드에 진입했다가 일시정지를 누른상태에서 interrupt ended 이벤트를 받을 수 없음
         controlSessionActivation(false)
+        
         resolve("Recorder paused!")
     }
     
@@ -300,6 +303,10 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
         
         if (_isFailResumeByNative) {
             return reject("RNAudioPlayerRecorder", "voip", nil)
+        }
+        
+        if (_isCalled) {
+            return reject("RNAudioPlayerRecorder", "call", nil)
         }
         
         // 녹음 덮어쓰기가 발생하지 않도록 Fix
@@ -371,12 +378,41 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
 // slack hudle과 같은 voip 전화는 interrupt handler에서 정확한처리가 불가
 // 이를 처리하기 위해 추가
 extension RNAudioRecorder: CXCallObserverDelegate {
+    func changeIsCallEvent() {
+        if (!_isCalled) {
+            _isCalled = true
+        }
+    }
+    
     func callObserver(_ callObserver: CXCallObserver, callChanged call: CXCall) {
         if call.hasEnded {
+            print("DEBUG: CallKitEvent - hasEnded")
+            _isCalled = false
             if (_isFailResumeByNative) {
-                sendEvent(withName: "rn-recordback", body: ["status": "failResumeByNative"])
+                if (!_isPausedByUser) {
+                    sendEvent(withName: "rn-recordback", body: ["status": "failResumeByNative"])
+                }
                 _isFailResumeByNative = false
             }
+        }
+        else if call.isOnHold {
+            print("DEBUG: CallKitEvent - isOnHold")
+            changeIsCallEvent()
+        }
+        else if call.isOutgoing {
+            print("DEBUG: CallKitEvent - isOutgoing")
+            changeIsCallEvent()
+        }
+        else if call.hasConnected {
+            print("DEBUG: CallKitEvent - hasConnected")
+            changeIsCallEvent()
+        }
+        else if !call.isOutgoing && !call.hasConnected && !call.hasEnded {
+            print("DEBUG: CallKitEvent - incoming")
+            changeIsCallEvent()
+        } else {
+            print("DEBUG: CallKitEvent - missed")
+            _isCalled = false
         }
     }
 }
