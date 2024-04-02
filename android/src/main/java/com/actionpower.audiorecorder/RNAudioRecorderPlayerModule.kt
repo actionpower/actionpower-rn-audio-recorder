@@ -132,7 +132,6 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
                     val maxAmplitude = mediaRecorder?.maxAmplitude ?: 0
                     val dB = if(maxAmplitude != null && maxAmplitude > 0) { 20 * log10(maxAmplitude / 32767.0) } else -160.0
 
-                    val musicStreamActivated = audioManager?.isMusicActive ?: false
                     var isSilenced = false
 
                     if(Build.VERSION.SDK_INT >= 29) {
@@ -150,14 +149,14 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
                         sendEvent(reactContext, "rn-recordback", obj)
                     }
 
-                    if(isSilenced || musicStreamActivated) {
+                    if(isSilenced) {
                         if (!isInterrupted) {
                             obj.putString("status", "pausedByNative")
                             sendEvent(reactContext, "rn-recordback", obj)
                             isInterrupted = true
                             pauseTask()
                         }
-                    } else if(isSilenced == false && musicStreamActivated == false){
+                    } else {
                         if(isInterrupted) {
                             isInterrupted = false
                             obj.putString("status", "resumeByNative")
