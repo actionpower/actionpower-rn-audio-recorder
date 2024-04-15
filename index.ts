@@ -140,7 +140,7 @@ export type RecordBackType = {
   isRecording?: boolean;
   currentPosition: number;
   currentMetering?: number;
-  status?: 'pausedByNative' | 'resumeByNative' | 'failResumeByNative';
+  status?: 'pausedByNative' | 'resumeByNative' | 'failResumeByNative' | 'recordFinishedSuccessfully' | 'recordFinishedWithError';
 };
 
 export type PlayBackType = {

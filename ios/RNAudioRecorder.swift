@@ -358,6 +358,18 @@ class RNAudioRecorder: RCTEventEmitter, AVAudioRecorderDelegate {
         }
     }
     
+    func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
+        if flag {
+            // 녹음 성공
+            print("DEBUG: Audio recording finished successfully.")
+            sendEvent(withName: "rn-recordback", body: ["status": "recordFinishedSuccessfully"])
+        } else {
+            // 녹음 실패
+            print("DEBUG: Audio recording finished with error.")
+            sendEvent(withName: "rn-recordback", body: ["status": "recordFinishedWithError"])
+        }
+    }
+
     @objc func controlRouteChange(notification: Notification) {
         guard let userInfo = notification.userInfo,
               let reasonValue = userInfo[AVAudioSessionRouteChangeReasonKey] as? UInt,
