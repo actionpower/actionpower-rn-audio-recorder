@@ -82,7 +82,7 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
                 setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
                 setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
                 setAudioEncodingBitRate(128000)
-                setAudioSamplingRate(48000)
+                setAudioSamplingRate(16000)
                 setOutputFile(audioFileURL)
             }
 
