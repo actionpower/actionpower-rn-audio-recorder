@@ -81,20 +81,20 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
         mediaRecorder = MediaRecorder().apply {
             if(audioSet == null) {
                 setAudioSource(MediaRecorder.AudioSource.MIC)
-                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
                 setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
                 setAudioEncodingBitRate(128000)
                 setAudioSamplingRate(16000)
             } else {
                 setAudioSource(if (audioSet.hasKey("AudioSourceAndroid")) audioSet.getInt("AudioSourceAndroid") else MediaRecorder.AudioSource.MIC)
-                setAudioEncoder(if (audioSet.hasKey("AudioEncoderAndroid")) audioSet.getInt("AudioEncoderAndroid") else MediaRecorder.AudioEncoder.AAC)
                 setOutputFormat(if (audioSet.hasKey("OutputFormatAndroid")) audioSet.getInt("OutputFormatAndroid") else MediaRecorder.OutputFormat.MPEG_4)
+                setAudioEncoder(if (audioSet.hasKey("AudioEncoderAndroid")) audioSet.getInt("AudioEncoderAndroid") else MediaRecorder.AudioEncoder.AAC)
                 setAudioEncodingBitRate(if (audioSet.hasKey("AudioEncodingBitRateAndroid")) audioSet.getInt("AudioEncodingBitRateAndroid") else 128000)
-                setAudioSamplingRate(if (audioSet.hasKey("AudioSamplingRateAndroid")) audioSet.getInt("AudioSamplingRateAndroid" else 16000))
+                setAudioSamplingRate(if (audioSet.hasKey("AudioSamplingRateAndroid")) audioSet.getInt("AudioSamplingRateAndroid") else 16000)
                 
                 if (audioSet.hasKey("AudioChannelsAndroid")) {
                     setAudioChannels(audioSet.getInt("AudioChannelsAndroid"))
-                }                
+                }
             }
             setOutputFile(audioFileURL)
         }
