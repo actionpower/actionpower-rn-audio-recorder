@@ -23,6 +23,7 @@ apply plugin: 'com.android.library'
 apply plugin: 'kotlin-android'
 
 android {
+  namespace "com.actionpower.audiorecorder"
   compileSdkVersion safeExtGet('compileSdkVersion', 31)
 
   defaultConfig {
