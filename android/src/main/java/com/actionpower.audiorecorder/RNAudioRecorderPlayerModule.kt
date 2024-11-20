@@ -75,16 +75,29 @@ class RNAudioRecorderModule(private val reactContext: ReactApplicationContext) :
             promise.reject("No permission granted.", "Try again after adding permission.")
             return
         }
+
         audioFileURL = if (((path == "DEFAULT"))) "${reactContext.cacheDir}/$defaultFileName" else path
 
         mediaRecorder = MediaRecorder().apply {
+            if(audioSet == null) {
                 setAudioSource(MediaRecorder.AudioSource.MIC)
-                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
                 setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
                 setAudioEncodingBitRate(128000)
                 setAudioSamplingRate(16000)
-                setOutputFile(audioFileURL)
+            } else {
+                setAudioSource(if (audioSet.hasKey("AudioSourceAndroid")) audioSet.getInt("AudioSourceAndroid") else MediaRecorder.AudioSource.MIC)
+                setAudioEncoder(if (audioSet.hasKey("AudioEncoderAndroid")) audioSet.getInt("AudioEncoderAndroid") else MediaRecorder.AudioEncoder.AAC)
+                setOutputFormat(if (audioSet.hasKey("OutputFormatAndroid")) audioSet.getInt("OutputFormatAndroid") else MediaRecorder.OutputFormat.MPEG_4)
+                setAudioEncodingBitRate(if (audioSet.hasKey("AudioEncodingBitRateAndroid")) audioSet.getInt("AudioEncodingBitRateAndroid") else 128000)
+                setAudioSamplingRate(if (audioSet.hasKey("AudioSamplingRateAndroid")) audioSet.getInt("AudioSamplingRateAndroid" else 16000))
+                
+                if (audioSet.hasKey("AudioChannelsAndroid")) {
+                    setAudioChannels(audioSet.getInt("AudioChannelsAndroid"))
+                }                
             }
+            setOutputFile(audioFileURL)
+        }
 
         
 
